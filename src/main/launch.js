@@ -12,6 +12,8 @@ const { app, shell } = require('electron');
 const { powershell } = require('./apps');
 
 const WIN = process.platform === 'win32';
+const MAC = process.platform === 'darwin';
+const os = require('node:os');
 // not things to open from a chat: uninstallers, help pages and the like
 const SKIP = /uninstall|désinstaller|desinstalar|deinstall|readme|documentation|release notes|support center|website|manual/i;
 const STEAM_SKIP = /redistributable|dedicated server|steamworks/i;
@@ -27,6 +29,12 @@ const words = (text) => plain(text).split(/[^\p{L}\p{N}]+/u).filter((w) => w.len
 // Everything she can open: [{ name, kind: 'app' | 'steam' | 'epic', id }]
 async function launchables() {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.items;
+  if (MAC) {
+    const apps = await require('./macos').run('installed');
+    const games = steamGames(path.join(os.homedir(), 'Library', 'Application Support', 'Steam'));
+    cache = { at: Date.now(), items: [...games, ...apps].filter((item) => !SKIP.test(item.name)) };
+    return cache.items;
+  }
   if (!WIN) return [];
   const items = [];
   const seen = new Set();
@@ -201,6 +209,9 @@ async function launch({ kind, id } = {}) {
   if (!item) throw new Error('not found');
   if (kind === 'steam') return shell.openExternal(`steam://rungameid/${id}`);
   if (kind === 'epic') return shell.openExternal(`com.epicgames.launcher://apps/${encodeURIComponent(id)}?action=launch&silent=true`);
+  if (MAC) {
+    return new Promise((resolve, reject) => execFile('/usr/bin/open', ['-a', id], (err) => (err ? reject(err) : resolve())));
+  }
   spawn('explorer.exe', [`shell:AppsFolder\\${id}`], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   return undefined;
 }
@@ -213,7 +224,9 @@ const KEY_DOWN = 1; // KEYEVENTF_EXTENDEDKEY
 const KEY_UP = 3;   // ...and KEYEVENTF_KEYUP
 
 async function media(action) {
-  if (!WIN || !MEDIA[action]) return false;
+  if (!MEDIA[action]) return false;
+  if (MAC) return require('./macos').run('media', action).then((r) => r.ok, () => false);
+  if (!WIN) return false;
   const [key, times] = MEDIA[action];
   return powershell(
     'Add-Type -Namespace Capri -Name Keys -MemberDefinition \'[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);\'; '
