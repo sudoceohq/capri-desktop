@@ -116,6 +116,11 @@ func closeTab() {
           let up = CGEvent(keyboardEventSource: source, virtualKey: 13, keyDown: false) else {
         emit(["ok": false]); return
     }
+    // Command-Shift-W closes the whole window, and Command-Option-W closes the other tabs.
+    let held = CGEventSource.flagsState(.hidSystemState)
+    if held.contains(.maskShift) || held.contains(.maskAlternate) || held.contains(.maskControl) {
+        emit(["ok": false]); return
+    }
     down.flags = .maskCommand // kVK_ANSI_W. Command-W closes the front browser tab.
     up.flags = .maskCommand
     down.post(tap: .cghidEventTap)
