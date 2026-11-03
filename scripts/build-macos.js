@@ -24,8 +24,30 @@ if (process.platform === 'darwin') {
   if (universal) execFileSync('xcrun', ['lipo', '-create', ...outputs, '-output', target]);
   else fs.copyFileSync(outputs[0], target);
   fs.chmodSync(target, 0o755);
-  // electron-builder requires at least a 512px macOS icon. Reuse the existing artwork.
-  execFileSync('/usr/bin/sips', ['-z', '1024', '1024', path.join(root, 'assets/icons/capri.png'),
-    '--out', path.join(dir, 'capri.png')], { stdio: 'pipe' });
+  writeIcon(root);
   console.log(`[capri] macOS helper: ${archs.join(' + ')}`);
+}
+
+// electron-builder wants an .icns. The repo only has a 256px PNG, so scale it on the Mac that packs.
+function writeIcon(root) {
+  const src = path.join(root, 'assets', 'icons', 'capri.png');
+  const set = path.join(root, 'native', 'bin', 'capri.iconset');
+  fs.rmSync(set, { recursive: true, force: true });
+  fs.mkdirSync(set, { recursive: true });
+  const pixels = {
+    'icon_16x16.png': 16,
+    'icon_16x16@2x.png': 32,
+    'icon_32x32.png': 32,
+    'icon_32x32@2x.png': 64,
+    'icon_128x128.png': 128,
+    'icon_128x128@2x.png': 256,
+    'icon_256x256.png': 256,
+    'icon_256x256@2x.png': 512,
+    'icon_512x512.png': 512,
+    'icon_512x512@2x.png': 1024,
+  };
+  for (const [name, size] of Object.entries(pixels)) {
+    execFileSync('/usr/bin/sips', ['-z', String(size), String(size), src, '--out', path.join(set, name)], { stdio: 'pipe' });
+  }
+  execFileSync('iconutil', ['-c', 'icns', set, '-o', path.join(root, 'assets', 'icons', 'capri.icns')], { stdio: 'pipe' });
 }

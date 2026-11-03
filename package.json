@@ -19,6 +19,8 @@
     "check:llm": "node scripts/check-llm.js",
     "test:hooks": "node --test tests/hooks.test.js",
     "dist": "electron-builder --win",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux",
     "native:mac": "node scripts/build-macos.js",
     "prestart": "node scripts/build-macos.js",
     "predev": "node scripts/build-macos.js",
@@ -74,11 +76,15 @@
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        { "target": "dmg", "arch": "universal" },
+        { "target": "zip", "arch": "universal" }
       ],
       "category": "public.app-category.entertainment",
       "minimumSystemVersion": "13.0",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "icon": "assets/icons/capri.icns",
       "extraResources": [
         {
           "from": "native/bin/capri-macos",
@@ -86,9 +92,16 @@
         }
       ],
       "extendInfo": {
-        "NSAppleEventsUsageDescription": "Capri opens coding assistant sessions in Terminal only when you ask."
-      },
-      "icon": "native/bin/capri.png"
+        "NSAppleEventsUsageDescription": "Capri opens Terminal and System Settings only when you ask.",
+        "NSScreenCaptureUsageDescription": "Capri takes a picture of the screen only when you ask her to look or to snip.",
+        "NSAudioCaptureUsageDescription": "macOS requires this description before an app can capture the screen. Capri does not record the microphone."
+      }
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/icons/capri.png",
+      "category": "Utility",
+      "artifactName": "Capri-${version}-${arch}.${ext}"
     }
   }
 }
