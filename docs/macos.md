@@ -50,7 +50,7 @@ npm run dist:mac
 
 This builds a universal helper and a universal DMG and ZIP in `dist/`. The helper ships in `Capri.app/Contents/Resources/capri-macos`, outside ASAR, so installed users do not need a compiler. The icon is an `.icns` scaled on the build Mac from `assets/icons/capri.png` (256 pixels, so it looks soft). `npm run dist` and `npm run dist:win` build the Windows NSIS installer. `npm run dist:linux` builds an AppImage and a deb.
 
-CI runs the tests on macOS, Windows, and Linux, and uploads the DMG, ZIP, and Windows installer. It does not publish a release.
+CI runs the tests on macOS, Windows, and Linux, and uploads the DMG, ZIP, and Windows installer. The macOS jobs use `macos-15-intel`, because standard arm64 runners are being cancelled before they start. The helper is still built as a universal binary, and pull-request builds set `CSC_FOR_PULL_REQUEST` so the app is ad-hoc signed. CI does not publish a release.
 
 ## Performance bounds
 
