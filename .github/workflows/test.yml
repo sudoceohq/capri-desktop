@@ -1,7 +1,11 @@
 name: Tests and desktop builds
 on:
-  push:
   pull_request:
+  push:
+    branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -20,6 +24,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm test
   macos-build:
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
