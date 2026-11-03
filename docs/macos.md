@@ -17,12 +17,26 @@ npm start
 
 The menu is in the macOS menu bar and on Capri's right-click menu. **Command+Option+C** stows/restores her. **Command+Q** quits her. Chat and setup fields use native Edit shortcuts including paste and select all. Login startup is offered in the packaged app only; move it to its intended location before enabling it.
 
+## Install a built app
+
+`npm run dist:mac` writes a universal DMG and ZIP in `dist/`. CI uploads the same pair as the `Capri-macOS-test` artifact. The build is ad-hoc signed and not notarized.
+
+1. Open the DMG and drag Capri to Applications.
+2. The first launch is blocked by Gatekeeper. Control-click `Capri.app`, choose **Open**, then **Open** again. Or, in Terminal: `xattr -cr /Applications/Capri.app`.
+3. Leave the app in Applications before turning on launch at login.
+
+An ad-hoc signature lets the app run on another Mac after that quarantine removal. It is not a Developer ID signature. Hardened runtime is off, because the default hardened runtime rejects Electron's frameworks when the signature is ad-hoc. Do not put signing certificates in this repository.
+
 ## Native integrations and permissions
 
-- **Window tracking:** Quartz lists window IDs and bounds in logical points, in front-to-back order. Capri does not request screenshots, window titles, or window contents. Maximized/fullscreen windows are not perches. Changes of Space, minimized/closed windows, and windows moved between displays are reflected by polling. This path does not intentionally request Screen Recording or Accessibility permission.
-- **App launching:** discovers `.app` bundles in `/Applications`, `/System/Applications`, and `~/Applications`, plus installed Steam manifests. A launch request must match an item in that inventory; paths are passed as individual arguments, never shell commands. Windows-specific Epic manifests and Start menu shortcuts remain Windows-only.
-- **App closing:** lists regular running applications by bundle ID. A confirmed close asks the app to terminate normally so it can ask to save work. Force quit remains a second explicit confirmation. Finder, system components, Capri/Electron, the coding assistants, and Ollama are excluded.
-- **Media keys:** macOS requires Accessibility access for synthetic media key events. This is requested only after a media action. If denied, chat explains the requirement; the menu links to the relevant System Settings page. Play/pause toggles playback, as on Windows.
+- **Window tracking:** Quartz lists window IDs and bounds in logical points, in front-to-back order. That path does not request Screen Recording. Maximized and fullscreen windows are not perches. Changes of Space, minimized or closed windows, and windows moved between displays are reflected by polling.
+- **Other AIs:** if Accessibility is already granted, the helper also reads the front window's title and the main process matches it against the same fixed list Windows uses. The title is not sent to the window overlay. Closing that browser tab sends Command-W only while the page is still in front. Capri does not prompt for Accessibility at launch. Grant it from the menu (the media-controls item opens the same pane) or tab close stays unavailable. Game detection and USB reactions stay Windows-only, because macOS has no equivalent that avoids a broader device scan.
+- **App launching:** discovers `.app` bundles in `/Applications`, `/System/Applications`, and `~/Applications`, plus installed Steam manifests. A launch request must match an item in that inventory. Paths are passed as individual arguments, never shell commands. Epic manifests and Start menu shortcuts remain Windows-only.
+- **Files and folders:** opens Finder, Trash, and the usual user folders. File search walks the same bounded folders by name and type. Windows Search stays Windows-only. Desktop app bundles, scripts, and installers still need the confirmation button.
+- **Chat controls for the computer:** settings panes open System Settings URLs. Volume uses `osascript`. Sleep uses `pmset sleepnow`. Lock is Control-Command-Q through System Events, so it follows that shortcut. A screenshot snip runs `screencapture -i -c` and needs Screen Recording. Dark mode, hiding other apps, and placing a window on the left or right half use System Events and need Accessibility plus Automation for System Events. Shut down and restart are scheduled in a Capri process and confirmed by macOS. They do not use a root countdown. Cancel kills that process.
+- **Screen pictures:** screenshot and optional screen commentary use Electron screen capture and may require Screen Recording. That is separate from window tracking. Leave commentary off for model-free checks. The app's Info.plist carries usage strings for AppleEvents, screen capture, and the audio-capture description macOS requires before screen capture works.
+- **App closing:** lists regular running applications by bundle ID. A confirmed close asks the app to terminate normally so it can ask to save work. Force quit remains a second explicit confirmation. Finder, system components, Capri, Electron, the coding assistants, and Ollama are excluded.
+- **Media keys:** macOS requires Accessibility for synthetic media key events. This is requested only after a media action. If denied, chat explains the requirement. The menu links to the Accessibility pane. Play and pause share one key, as on Windows.
 - **Ollama:** detects the app in system/user Applications and common CLI locations, and opens the macOS app on request. Installing it is a manual download from [Ollama](https://ollama.com/download). Starting Claude Code/Codex through Ollama opens Terminal and may ask for macOS Automation permission. Denial is reported in the setup panel.
 - **API keys:** Electron `safeStorage` uses the macOS Keychain. If it is unavailable, new keys are rejected rather than saved in plaintext. Chat history and other preferences are stored locally as ordinary JSON; keys are not returned to the renderer. Sending chat to a remote provider sends its conversation/context to that provider, as on Windows.
 
@@ -34,9 +48,9 @@ The overlay stays out of the menu bar. Screen-edge resting extends to the bottom
 npm run dist:mac
 ```
 
-This builds a universal helper and universal DMG/ZIP in `dist/`. The helper ships in `Capri.app/Contents/Resources/capri-macos`, outside ASAR, so installed users do not need a compiler. `npm run dist` continues to build the existing Windows NSIS installer.
+This builds a universal helper and a universal DMG and ZIP in `dist/`. The helper ships in `Capri.app/Contents/Resources/capri-macos`, outside ASAR, so installed users do not need a compiler. The icon is an `.icns` scaled on the build Mac from `assets/icons/capri.png` (256 pixels, so it looks soft). `npm run dist` and `npm run dist:win` build the Windows NSIS installer. `npm run dist:linux` builds an AppImage and a deb.
 
-CI builds ad-hoc-signed macOS test artifacts and a Windows installer; it does not publish a release. Ad-hoc signatures are not Developer ID signatures or notarization. For public distribution, configure electron-builder with the maintainer's signing/notarization credentials. Never add credentials to this repository.
+CI runs the tests on macOS, Windows, and Linux, and uploads the DMG, ZIP, and Windows installer. It does not publish a release.
 
 ## Performance bounds
 

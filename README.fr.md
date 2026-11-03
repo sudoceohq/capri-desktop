@@ -330,7 +330,8 @@ npm start
 ```
 
 Garde ce terminal ouvert tant qu'elle tourne. Sur macOS, il faut aussi les outils de ligne de commande d’Apple
-(`xcode-select --install`) pour compiler le petit programme natif. Voir le [guide macOS](docs/macos.md) (en anglais)
+(`xcode-select --install`) pour compiler le petit programme natif. Un DMG non signé s'installe en le glissant dans
+Applications, puis Contrôle-clic › Ouvrir, ou `xattr -cr /Applications/Capri.app`. Voir le [guide macOS](docs/macos.md) (en anglais)
 pour les prérequis, la création des paquets et l’état des tests. Linux reste non testé ; le calque transparent fonctionne
 mieux sous X11 et le suivi des fenêtres ainsi que le contrôle des applications n’y sont pas implémentés.
 
