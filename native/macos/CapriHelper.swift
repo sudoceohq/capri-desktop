@@ -1,4 +1,7 @@
-// Small macOS adapter. Window metadata only: no screenshots, titles, or window contents.
+// Small macOS adapter. Window bounds come from Quartz and do not need Screen Recording.
+// A front-window title is read through Accessibility only after that permission is already
+// granted, and only so the main process can match a fixed list of other AIs. The watch
+// loop never asks for the permission itself.
 import AppKit
 import ApplicationServices
 
@@ -83,7 +86,41 @@ func snapshot(excluding windowID: Int) -> [String: Any] {
                         "w": rect.width, "h": rect.height, "max": maximized])
         if windows.count >= 40 { break }
     }
-    return ["fg": foreground, "frontPid": frontPID ?? 0, "wins": windows]
+    var result: [String: Any] = ["fg": foreground, "frontPid": frontPID ?? 0, "wins": windows]
+    let front = frontInfo()
+    result["trusted"] = front.trusted
+    if front.trusted {
+        result["title"] = front.title
+        result["bundle"] = front.bundle
+    }
+    return result
+}
+
+func frontInfo() -> (title: String, bundle: String, trusted: Bool) {
+    let trusted = AXIsProcessTrusted()
+    guard trusted, let app = NSWorkspace.shared.frontmostApplication else { return ("", "", trusted) }
+    let bundle = app.bundleIdentifier ?? ""
+    let ax = AXUIElementCreateApplication(app.processIdentifier)
+    var windowRef: AnyObject?
+    guard AXUIElementCopyAttributeValue(ax, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
+          let window = windowRef else { return ("", bundle, trusted) }
+    var titleRef: AnyObject?
+    AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &titleRef)
+    return (titleRef as? String ?? "", bundle, trusted)
+}
+
+func closeTab() {
+    guard AXIsProcessTrusted(),
+          let source = CGEventSource(stateID: .hidSystemState),
+          let down = CGEvent(keyboardEventSource: source, virtualKey: 13, keyDown: true),
+          let up = CGEvent(keyboardEventSource: source, virtualKey: 13, keyDown: false) else {
+        emit(["ok": false]); return
+    }
+    down.flags = .maskCommand // kVK_ANSI_W. Command-W closes the front browser tab.
+    up.flags = .maskCommand
+    down.post(tap: .cghidEventTap)
+    up.post(tap: .cghidEventTap)
+    emit(["ok": true])
 }
 
 func restoreFocus(owner: Int32, previous: Int32) {
@@ -153,6 +190,7 @@ case "restore-focus" where args.count == 3:
         restoreFocus(owner: owner, previous: previous)
     }
 case "close" where args.count == 3: closeApp(args[1], force: args[2] == "force")
+case "close-tab": closeTab()
 case "media" where args.count == 2: media(args[1])
 default:
     fputs("Unknown Capri helper command\n", stderr)

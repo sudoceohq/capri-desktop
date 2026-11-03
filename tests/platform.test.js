@@ -101,11 +101,17 @@ test('macOS watch coordinates stay in points, including negative displays', () =
     { id: 12, x: -1000, y: 60, w: 600, h: 400, max: false },
     { id: 13, x: 500, y: 60, w: 600, h: 400, max: false },
   ] }, { x: -1440, y: 25, width: 1440, height: 875 }), {
-    fg: 12, wins: [{ id: 12, x: 440, y: 35, w: 600, h: 400, max: false }],
+    fg: 12, ai: [], pages: [], dl: false, wins: [{ id: 12, x: 440, y: 35, w: 600, h: 400, max: false }],
   });
+  const jealous = mac.toOverlay({
+    fg: 3, title: 'ChatGPT - Google Chrome', bundle: 'com.google.Chrome', wins: [],
+  }, { x: 0, y: 0, width: 1000, height: 800 });
+  assert.equal(jealous.title, undefined);
+  assert.equal(jealous.bundle, undefined);
+  assert.deepEqual(jealous.pages, ['chatgpt']);
 });
 test('Windows watcher still uses PowerShell, physical-pixel conversion and taskbar state', () => {
-  const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.stdin = new PassThrough();
   let killed = false; child.kill = () => { killed = true; };
   let invocation; let received; let dipCalls = 0;
   const watcher = load('windows.js', 'win32', {
@@ -122,7 +128,10 @@ test('Windows watcher still uses PowerShell, physical-pixel conversion and taskb
   assert.ok(invocation.args.includes('Bypass'));
   assert.equal(invocation.args.at(-2), '42');
   assert.equal(dipCalls, 1);
-  assert.deepEqual(received, { fg: 5, taskbar: true, wins: [{ id: 5, x: 50, y: 50, w: 400, h: 300, max: false }] });
+  assert.deepEqual(received, {
+    fg: 5, taskbar: true, ai: [], pages: [], dl: false, game: null, usb: [], plug: null,
+    wins: [{ id: 5, x: 50, y: 50, w: 400, h: 300, max: false }],
+  });
   watch.stop(); assert.equal(killed, true);
 });
 test('macOS panel dismissal remembers the external app across Capri activation', async () => {
@@ -144,7 +153,8 @@ test('macOS panel dismissal remembers the external app across Capri activation',
   for (const frontPid of [77, 1234]) child.stdout.write(JSON.stringify({ fg: 0, frontPid, wins: [] }) + '\n');
   await watch.restoreFocus();
   assert.deepEqual(calls, [['restore-focus', '1234', '77']]);
-  assert.deepEqual(received, { fg: 0, wins: [] }); // process metadata stays in the main process
+  assert.equal(received.frontPid, undefined);
+  assert.deepEqual(received, { fg: 0, ai: [], pages: [], dl: false, wins: [] });
   watch.stop();
 });
 test('macOS app launch passes a discovered path as a single argument; unknown paths are rejected', async () => {
@@ -383,4 +393,44 @@ test('packaged macOS Codex hooks use the bundled runtime even without Node on PA
   assert.match(command, /^ELECTRON_RUN_AS_NODE=1 /);
   assert.match(command, /QA'"'"'s Capri/);
   assert.match(command, /capri-codex-hook\.js'$/);
+});
+
+test('macOS tab close sends Command-W only for the rival page still in front', async () => {
+  const calls = [];
+  const mac = load('macos.js', 'darwin', {
+    electron: { app: { isPackaged: false } },
+    'node:child_process': {
+      spawn() { throw new Error('watch not used'); },
+      execFile(_file, args, _opts, done) {
+        calls.push(args);
+        if (args[0] === 'close-tab') done(null, '{"ok":true}');
+        else done(null, JSON.stringify({
+          fg: 9, trusted: true, title: 'ChatGPT - Google Chrome', bundle: 'com.google.Chrome', wins: [],
+        }));
+      },
+    },
+  });
+  const watch = mac.startWindowWatch({ overlay: {
+    isDestroyed: () => true, getMediaSourceId: () => 'window:1:0',
+    getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
+  }, onUpdate() {} });
+  assert.equal(await watch.close(9, 'chatgpt'), '');
+  assert.equal(calls.at(-1)[0], 'close-tab');
+  assert.equal(await watch.close(3, 'chatgpt'), 'front');
+  const denied = load('macos.js', 'darwin', {
+    electron: { app: { isPackaged: false } },
+    'node:child_process': {
+      spawn() { throw new Error('watch not used'); },
+      execFile(_file, args, _opts, done) {
+        done(null, JSON.stringify({ fg: 9, trusted: false, wins: [] }));
+      },
+    },
+  });
+  const quiet = denied.startWindowWatch({ overlay: {
+    isDestroyed: () => true, getMediaSourceId: () => 'window:1:0',
+    getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
+  }, onUpdate() {} });
+  assert.equal(await quiet.close(9, 'chatgpt'), 'keys');
+  watch.stop();
+  quiet.stop();
 });

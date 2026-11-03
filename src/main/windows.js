@@ -1,8 +1,8 @@
 'use strict';
 
-// Feeds the overlay with the position of the other windows (Windows only), so Capri can
-// sit on them. A small PowerShell helper does the Win32 calls; we turn its physical pixels
-// into the overlay's coordinates. It also says when the window in front is another AI (ChatGPT,
+// Feeds the overlay with the position of the other windows, so Capri can sit on them.
+// Windows: a PowerShell helper, and its physical pixels are converted here. macOS: macos.js.
+// It also says when the window in front is another AI (ChatGPT,
 // Gemini…: `ai`, the names it matched; `pages`, the ones whose own page it is in a browser; `dl`,
 // a page to download one of them), for her jealousy, and never passes on a title; which game
 // is in front, if one (`game`, its folder in Steam's library or another launcher's); and the USB

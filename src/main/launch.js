@@ -1,10 +1,11 @@
 'use strict';
 
-// Opening things when you ask her to (chat.js): an app from the Start menu (Store apps like Spotify
-// included), a Steam or Epic game, your music (the media keys: pause, next…, so it works with
-// Spotify and most players), a Spotify search, or a website. Windows only.
+// Opening things when you ask her to (chat.js): an app, a Steam or Epic game, your music (the media
+// keys: pause, next…, so it works with Spotify and most players), a Spotify search, or a website.
+// macOS opens .app bundles, Finder, and Trash. Epic and the Start menu stay Windows-only.
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn, execFile } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
@@ -13,7 +14,6 @@ const { powershell } = require('./apps');
 
 const WIN = process.platform === 'win32';
 const MAC = process.platform === 'darwin';
-const os = require('node:os');
 // not things to open from a chat: uninstallers, help pages and the like
 const SKIP = /uninstall|désinstaller|desinstalar|deinstall|readme|documentation|release notes|support center|website|manual/i;
 const STEAM_SKIP = /redistributable|dedicated server|steamworks/i;
@@ -143,7 +143,7 @@ function match(items, text) {
 
 // What's on your desktop (yours and the shared one): files, folders and shortcuts, by name.
 function desktopItems() {
-  const dirs = [app.getPath('desktop'), path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Desktop')];
+  const dirs = [app.getPath('desktop'), ...(WIN ? [path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Desktop')] : [])];
   const items = [];
   for (const dir of dirs) {
     let entries = [];
@@ -154,7 +154,7 @@ function desktopItems() {
     }
     for (const e of entries) {
       if (e.name.startsWith('.') || /^desktop\.ini$/i.test(e.name)) continue;
-      const folder = e.isDirectory();
+      const folder = e.isDirectory() && !(MAC && /\.app$/i.test(e.name));
       items.push({ name: folder ? e.name : e.name.replace(/\.[^.]+$/, ''), kind: folder ? 'folder' : 'file', id: path.join(dir, e.name) });
     }
   }
@@ -163,7 +163,8 @@ function desktopItems() {
 
 // files that run something: never opened without a click, even named by you
 const RUNS = /\.(exe|bat|cmd|ps1|vbs|vbe|js|jse|wsf|wsh|msi|msp|reg|scr|com|jar|hta|cpl|pif)$/i;
-const risky = (item) => item?.kind === 'file' && RUNS.test(item.id);
+const MAC_RUNS = /\.(app|command|sh|bash|zsh|py|pl|rb|scpt|applescript|workflow|pkg|dmg)$/i;
+const risky = (item) => item?.kind === 'file' && (RUNS.test(item.id) || (MAC && MAC_RUNS.test(item.id)));
 
 // Folders asked for by what they are ("ouvre mes téléchargements", "open the file explorer").
 const FOLDERS = [
@@ -178,11 +179,16 @@ const FOLDERS = [
 ];
 
 function knownFolder(text) {
+  if (MAC && /\bfinder\b/i.test(text)) return { name: 'explorer', kind: 'known', id: 'explorer' };
   const hit = FOLDERS.find(([, re]) => re.test(text));
   return hit ? { name: hit[0], kind: 'known', id: hit[0] } : null;
 }
 
 function openKnown(id) {
+  if (MAC) {
+    const dir = id === 'explorer' ? os.homedir() : id === 'recycle' ? path.join(os.homedir(), '.Trash') : app.getPath(id);
+    return Promise.resolve(shell.openPath(dir)).then((error) => { if (error) throw new Error(error); });
+  }
   if (id === 'explorer') return spawn('explorer.exe', [], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   if (id === 'recycle') return spawn('explorer.exe', ['shell:RecycleBinFolder'], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   return shell.openPath(app.getPath(id));
