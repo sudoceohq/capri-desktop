@@ -228,13 +228,38 @@ async function launch({ kind, id } = {}) {
 // The media keys, as if pressed on the keyboard: whatever plays music (Spotify, a browser…) reacts.
 // Play and pause are the same key; the volume moves a few steps at a time. Sent as keys (their virtual
 // key codes), not typed: typed, they come out as "³" or "°" on a German keyboard.
+// On macOS those posted keys report success and do nothing, so Music and the output volume are told directly.
 const MEDIA = { pause: [0xb3, 1], play: [0xb3, 1], next: [0xb0, 1], previous: [0xb1, 1], volup: [0xaf, 5], voldown: [0xae, 5], mute: [0xad, 1] };
 const KEY_DOWN = 1; // KEYEVENTF_EXTENDEDKEY
 const KEY_UP = 3;   // ...and KEYEVENTF_KEYUP
+const MAC_MUSIC = {
+  play: 'tell application "Music" to play',
+  pause: 'tell application "Music" to pause',
+  next: 'tell application "Music" to next track',
+  previous: 'tell application "Music" to previous track',
+};
+
+function macScript(script) {
+  return new Promise((resolve) => {
+    execFile('/usr/bin/osascript', ['-e', script], { timeout: 15000 }, (err) => resolve(!err));
+  });
+}
+
+async function macMedia(action) {
+  if (MAC_MUSIC[action]) return macScript(MAC_MUSIC[action]);
+  if (action === 'mute') return macScript('set volume with output muted');
+  const step = action === 'volup' ? 6 : action === 'voldown' ? -6 : 0;
+  if (!step) return false;
+  return macScript(`set currentLevel to output volume of (get volume settings)
+set nextLevel to currentLevel + (${step})
+if nextLevel > 100 then set nextLevel to 100
+if nextLevel < 0 then set nextLevel to 0
+set volume output volume nextLevel without muting`);
+}
 
 async function media(action) {
   if (!MEDIA[action]) return false;
-  if (MAC) return require('./macos').run('media', action).then((r) => r.ok, () => false);
+  if (MAC) return macMedia(action);
   if (!WIN) return false;
   const [key, times] = MEDIA[action];
   return powershell(

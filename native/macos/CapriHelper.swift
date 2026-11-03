@@ -58,7 +58,7 @@ func installedApps() -> [[String: String]] {
     return result
 }
 
-func snapshot(excluding windowID: Int) -> [String: Any] {
+func windowGeometry(excluding windowID: Int) -> [String: Any] {
     let rows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
         as? [[String: Any]] ?? []
     let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -86,7 +86,11 @@ func snapshot(excluding windowID: Int) -> [String: Any] {
                         "w": rect.width, "h": rect.height, "max": maximized])
         if windows.count >= 40 { break }
     }
-    var result: [String: Any] = ["fg": foreground, "frontPid": frontPID ?? 0, "wins": windows]
+    return ["fg": foreground, "frontPid": frontPID ?? 0, "wins": windows]
+}
+
+func snapshot(excluding windowID: Int) -> [String: Any] {
+    var result = windowGeometry(excluding: windowID)
     let front = frontInfo()
     result["trusted"] = front.trusted
     if front.trusted {
@@ -140,15 +144,36 @@ func restoreFocus(owner: Int32, previous: Int32) {
 
 func watch(windowID: Int, parent: Int32) {
     var previous = Data()
+    // The title read talks to another process. Doing it on every move makes her perch lag
+    // behind the window, so geometry updates on its own and the title refreshes about once a second.
+    var title = ""
+    var bundle = ""
+    var trusted = false
+    var titleFg = -1
+    var titleAt = Date.distantPast
     while kill(parent, 0) == 0 {
         autoreleasepool {
-            let value = snapshot(excluding: windowID)
+            var value = windowGeometry(excluding: windowID)
+            let fg = value["fg"] as? Int ?? 0
+            if fg != titleFg || Date().timeIntervalSince(titleAt) >= 1 {
+                let front = frontInfo()
+                title = front.title
+                bundle = front.bundle
+                trusted = front.trusted
+                titleFg = fg
+                titleAt = Date()
+            }
+            value["trusted"] = trusted
+            if trusted {
+                value["title"] = title
+                value["bundle"] = bundle
+            }
             if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), data != previous {
                 emitJSON(data)
                 previous = data
             }
         }
-        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.15))
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.08))
     }
 }
 

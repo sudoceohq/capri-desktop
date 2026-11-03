@@ -43,9 +43,19 @@ const run = (file, args) => new Promise((resolve) => {
   execFile(file, args, { windowsHide: true, timeout: 15000 }, (err) => resolve(!err));
 });
 
-const osa = (script) => new Promise((resolve) => {
-  execFile('/usr/bin/osascript', ['-e', script], { timeout: 20000 }, (err, out) => resolve(err ? null : String(out ?? '')));
+const osaResult = (script) => new Promise((resolve) => {
+  execFile('/usr/bin/osascript', ['-e', script], { timeout: 20000 }, (err, out, errText) => {
+    if (!err) return resolve({ ok: true, out: String(out ?? ''), denied: false });
+    const why = `${err.message || ''} ${errText || ''}`;
+    // System Events refuses the call until Accessibility is granted. -1743 is the Automation denial.
+    resolve({ ok: false, out: '', denied: /assistive|not allowed|not authorized|-1719|-1743|-1002/i.test(why) });
+  });
 });
+
+const osa = async (script) => {
+  const result = await osaResult(script);
+  return result.ok ? result.out : null;
+};
 
 const quoted = (value) => String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
@@ -97,7 +107,66 @@ async function info(what) {
       .find((a) => a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.'));
     return { ip: local?.address || null };
   }
+  if (what === 'bluetooth' && MAC) return { devices: await bluetoothDevices() };
   return null;
+}
+
+// Read-only. blueutil when the user has it, otherwise the system report.
+function bluetoothNames(text) {
+  const named = [...String(text).matchAll(/name:\s*"([^"]+)"/g)].map((match) => match[1]);
+  if (named.length) return named;
+  try {
+    const names = [];
+    const walk = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      for (const [key, value] of Object.entries(node)) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) { walk(value); continue; }
+        const flag = value.device_isconnected || value.device_connected || value.Connected;
+        if (flag === 'attrib_Yes' || flag === 'Yes' || flag === true) names.push(key);
+        else walk(value);
+      }
+    };
+    walk(JSON.parse(text));
+    if (names.length) return names;
+  } catch { /* the text report, below */ }
+  const found = [];
+  let device = '';
+  let deviceIndent = -1;
+  let list = false;
+  let listIndent = -1;
+  for (const line of String(text).split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const indent = line.match(/^ */)[0].length;
+    const trimmed = line.trim();
+    if (/^Not Connected:$/i.test(trimmed)) { list = false; device = ''; continue; }
+    if (/^Connected:$/i.test(trimmed)) { list = true; listIndent = indent; device = ''; continue; }
+    const header = trimmed.match(/^(.+):$/)?.[1];
+    if (header) {
+      if (list && indent > listIndent) found.push(header);
+      else { device = header; deviceIndent = indent; }
+      continue;
+    }
+    if (device && indent > deviceIndent && /^Connected:\s*(?:Yes|attrib_Yes|true)\b/i.test(trimmed)) found.push(device);
+  }
+  return found;
+}
+
+function commandOut(file, args) {
+  return new Promise((resolve) => {
+    execFile(file, args, { timeout: 20000, maxBuffer: 4 * 1024 * 1024 }, (err, out) => resolve(err ? null : String(out || '')));
+  });
+}
+
+async function bluetoothDevices() {
+  const bins = ['/opt/homebrew/bin/blueutil', '/usr/local/bin/blueutil'];
+  for (const bin of bins) {
+    if (!fs.existsSync(bin)) continue;
+    const out = await commandOut(bin, ['--connected']);
+    if (out != null) return bluetoothNames(out);
+  }
+  const out = await commandOut('/usr/sbin/system_profiler', ['SPBluetoothDataType', '-json']);
+  return out == null ? [] : bluetoothNames(out);
 }
 
 // Windows' own volume (the default speakers), through its Core Audio interfaces.
@@ -135,11 +204,19 @@ public static class CapriAudio {
 `;
 
 // { level } (0 to 100, unmuted too), { mute: true | false }, or neither: the level now
-async function volume({ level = null, mute = null } = {}) {
+async function volume({ level = null, mute = null, delta = null } = {}) {
   if (MAC) {
     if (Number.isFinite(level)) {
       const n = Math.round(Math.min(100, Math.max(0, level)));
       const out = await osa(`set volume output volume ${n} without muting`);
+      if (out == null) return null;
+    } else if (Number.isFinite(delta)) {
+      const step = Math.round(Math.min(100, Math.max(-100, delta)));
+      const out = await osa(`set currentLevel to output volume of (get volume settings)
+set nextLevel to currentLevel + (${step})
+if nextLevel > 100 then set nextLevel to 100
+if nextLevel < 0 then set nextLevel to 0
+set volume output volume nextLevel without muting`);
       if (out == null) return null;
     } else if (typeof mute === 'boolean') {
       const out = await osa(`set volume ${mute ? 'with' : 'without'} output muted`);
@@ -176,7 +253,9 @@ async function tidy(back = false) {
     const script = back
       ? 'tell application "System Events" to set visible of every process to true'
       : 'tell application "System Events" to set visible of every process whose visible is true and name is not "Finder" and name is not "Capri" to false';
-    return (await osa(script)) != null;
+    const result = await osaResult(script);
+    if (result.denied) return { denied: true };
+    return result.ok;
   }
   if (!WIN) return false;
   return apps.powershell(`(New-Object -ComObject Shell.Application).${back ? 'UndoMinimizeALL' : 'MinimizeAll'}()`).then(() => true, () => false);
@@ -196,8 +275,9 @@ async function arrange(name, side, display) {
       set position of window 1 to {${Math.round(x)}, ${Math.round(work.y)}}
       set size of window 1 to {${half}, ${Math.round(work.height)}}
     end tell`;
-    const out = await osa(script);
-    return { found: out != null, name: app.name };
+    const result = await osaResult(script);
+    if (result.denied) return { found: false, denied: true, name: app.name };
+    return { found: result.ok, name: app.name };
   }
   if (!WIN || !['left', 'right'].includes(side)) return null;
   const app = await apps.find(name).catch(() => null);
@@ -286,7 +366,11 @@ function act(req = {}, { display } = {}) {
   switch (req.action) {
     case 'settings': return settings(String(req.page));
     case 'info': return info(String(req.what));
-    case 'volume': return volume({ level: Number.isFinite(req.level) ? req.level : null, mute: typeof req.mute === 'boolean' ? req.mute : null });
+    case 'volume': return volume({
+      level: Number.isFinite(req.level) ? req.level : null,
+      mute: typeof req.mute === 'boolean' ? req.mute : null,
+      delta: Number.isFinite(req.delta) ? req.delta : null,
+    });
     case 'snip': return snip();
     case 'tidy': return tidy(Boolean(req.back));
     case 'arrange': return arrange(String(req.name || '').slice(0, 80), req.side, display);

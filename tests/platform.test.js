@@ -171,6 +171,31 @@ test('macOS app launch passes a discovered path as a single argument; unknown pa
   assert.deepEqual(calls, [['/usr/bin/open', ['-a', id]]]);
   assert.equal(await launch.media('unrecognized'), false);
 });
+test('macOS play, pause, and next tell Apple Music, and a failed script is not success', async () => {
+  const scripts = [];
+  let fail = false;
+  const launch = load('launch.js', 'darwin', {
+    electron: { shell: {} },
+    './macos': { run: async () => { throw new Error('media keys are not used'); } },
+    'node:fs': { readFileSync() { throw new Error('no Steam'); }, readdirSync() { return []; } },
+    'node:child_process': {
+      execFile(file, args, _opts, done) {
+        scripts.push([file, args[1]]);
+        done(fail ? new Error('denied') : null, '');
+      },
+    },
+  });
+  assert.equal(await launch.media('play'), true);
+  assert.equal(await launch.media('pause'), true);
+  assert.equal(await launch.media('next'), true);
+  assert.deepEqual(scripts.map(([, script]) => script), [
+    'tell application "Music" to play',
+    'tell application "Music" to pause',
+    'tell application "Music" to next track',
+  ]);
+  fail = true;
+  assert.equal(await launch.media('play'), false);
+});
 test('concurrent macOS app requests share discovery and failed scans can be retried', async () => {
   let scans = 0; let finish; let fail;
   const launch = load('launch.js', 'darwin', {

@@ -74,6 +74,60 @@ test('macOS window arrange names the running app and tidy hides the others', asy
   assert.equal(await system.act({ action: 'arrange', name: 'Missing', side: 'up' }, { display }), null);
 });
 
+test('macOS volume up steps from the current level, and a denied arrange says so', async () => {
+  const scripts = [];
+  const system = load('darwin', {
+    electron: { shell: {}, screen: {} },
+    './apps': { find: async () => ({ name: 'TextEdit', label: 'TextEdit' }) },
+    'node:child_process': {
+      execFile(_file, args, _opts, done) {
+        scripts.push(args[1]);
+        if (String(args[1]).includes('process')) done(new Error('osascript is not allowed assistive access'));
+        else if (args[1] === 'output volume of (get volume settings)') done(null, '46\n');
+        else done(null, '');
+      },
+      spawn() { return { pid: 1, unref() {} }; },
+    },
+  });
+  assert.deepEqual(await system.act({ action: 'volume', delta: 10 }), { level: 46 });
+  assert.match(scripts[0], /currentLevel \+ \(10\)/);
+  assert.deepEqual(await system.act({ action: 'arrange', name: 'TextEdit', side: 'left' }, { display }), {
+    found: false, denied: true, name: 'TextEdit',
+  });
+  assert.deepEqual(await system.act({ action: 'tidy' }), { denied: true });
+});
+
+test('macOS Bluetooth status prefers blueutil and otherwise reads system_profiler', async () => {
+  const blue = load('darwin', {
+    electron: { shell: {}, screen: {} },
+    './apps': {},
+    'node:fs': { existsSync: (file) => String(file).endsWith('/opt/homebrew/bin/blueutil'), readFileSync() { throw new Error('no'); }, rmSync() {}, writeFileSync() {} },
+    'node:child_process': {
+      execFile(file, args, _opts, done) {
+        assert.equal(file, '/opt/homebrew/bin/blueutil');
+        assert.deepEqual(args, ['--connected']);
+        done(null, 'address: aa-bb, name: "AirPods"\n');
+      },
+      spawn() { return { unref() {} }; },
+    },
+  });
+  assert.deepEqual(await blue.act({ action: 'info', what: 'bluetooth' }), { devices: ['AirPods'] });
+  const profile = load('darwin', {
+    electron: { shell: {}, screen: {} },
+    './apps': {},
+    'node:fs': { existsSync: () => false, readFileSync() { throw new Error('no'); }, rmSync() {}, writeFileSync() {} },
+    'node:child_process': {
+      execFile(file, args, _opts, done) {
+        assert.equal(file, '/usr/sbin/system_profiler');
+        assert.deepEqual(args, ['SPBluetoothDataType', '-json']);
+        done(null, JSON.stringify({ SPBluetoothDataType: [{ device_title: [{ Mouse: { device_isconnected: 'attrib_Yes' } }] }] }));
+      },
+      spawn() { return { unref() {} }; },
+    },
+  });
+  assert.deepEqual(await profile.act({ action: 'info', what: 'bluetooth' }), { devices: ['Mouse'] });
+});
+
 test('macOS shutdown can be cancelled before it runs', async () => {
   const killed = [];
   let spawned;
