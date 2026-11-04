@@ -89,8 +89,6 @@ test('macOS translations do not mutate any Windows or assistant wording', async 
     assert.doesNotMatch(mac.welcome.readyHow, /Ctrl\+Alt/);
     assert.match(mac.welcome.readyHow, /⌘⌥C/);
     assert.match(mac.welcome.noClaude, /Mac/);
-    assert.match(mac.jealous.blocked, /Capri/);
-    assert.doesNotMatch(mac.jealous.blocked, /\bPC\b/);
     assert.equal(JSON.stringify(LINES[lang]), original);
     assert.equal(linesFor(lang, 'claude', 'win32'), LINES[lang]);
     assert.equal(trayLabels(lang, 'win32'), TRAY[lang]);
@@ -100,8 +98,8 @@ test('macOS translations do not mutate any Windows or assistant wording', async 
 test('macOS watch coordinates stay in points, including negative displays', () => {
   const mac = load('macos.js', 'darwin', { electron: { app: { isPackaged: false } } });
   assert.deepEqual(mac.toOverlay({ fg: 12, wins: [
-    { id: 12, pid: 9, x: -1000, y: 60, w: 600, h: 400, max: false },
-    { id: 13, pid: 4, x: 500, y: 60, w: 600, h: 400, max: false },
+    { id: 12, x: -1000, y: 60, w: 600, h: 400, max: false },
+    { id: 13, x: 500, y: 60, w: 600, h: 400, max: false },
   ] }, { x: -1440, y: 25, width: 1440, height: 875 }), {
     fg: 12, ai: [], pages: [], dl: false, wins: [{ id: 12, x: 440, y: 35, w: 600, h: 400, max: false }],
   });
@@ -422,24 +420,18 @@ test('packaged macOS Codex hooks use the bundled runtime even without Node on PA
   assert.match(command, /capri-codex-hook\.js'$/);
 });
 
-function rivalClose({ snapshot, script, focus, keyed }) {
+test('macOS tab close sends Command-W only for the rival page still in front', async () => {
   const calls = [];
-  const prompts = [];
   const mac = load('macos.js', 'darwin', {
-    electron: {
-      app: { isPackaged: false },
-      systemPreferences: { isTrustedAccessibilityClient(on) { prompts.push(on); } },
-    },
+    electron: { app: { isPackaged: false } },
     'node:child_process': {
       spawn() { throw new Error('watch not used'); },
-      execFile(file, args, opts, done) {
-        const cb = typeof opts === 'function' ? opts : done;
-        calls.push({ file: String(file), args: [...args] });
-        if (String(file).endsWith('osascript')) script(args[1], cb);
-        else if (args[0] === 'snapshot') cb(null, JSON.stringify(snapshot()));
-        else if (args[0] === 'focus') cb(null, JSON.stringify(focus()));
-        else if (args[0] === 'close-tab') cb(null, JSON.stringify(keyed ? keyed() : { ok: false, why: 'access' }));
-        else cb(new Error(`unexpected ${args[0]}`));
+      execFile(_file, args, _opts, done) {
+        calls.push(args);
+        if (args[0] === 'close-tab') done(null, '{"ok":true}');
+        else done(null, JSON.stringify({
+          fg: 9, trusted: true, title: 'ChatGPT - Google Chrome', bundle: 'com.google.Chrome', wins: [],
+        }));
       },
     },
   });
@@ -447,207 +439,23 @@ function rivalClose({ snapshot, script, focus, keyed }) {
     isDestroyed: () => true, getMediaSourceId: () => 'window:1:0',
     getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
   }, onUpdate() {} });
-  const scripts = () => calls.filter((call) => call.file.endsWith('osascript')).map((call) => call.args[1]);
-  return { calls, prompts, scripts, watch };
-}
-const win = (id, pid) => ({ id, pid, x: 0, y: 0, w: 800, h: 600, max: false });
-
-test('macOS closes a rival tab by bringing that browser forward', async () => {
-  let phase = 'other';
-  const harness = rivalClose({
-    snapshot: () => {
-      if (phase === 'gone') return { fg: 9, frontPid: 42, trusted: true, title: 'New Tab - Google Chrome', bundle: 'com.google.Chrome', wins: [win(9, 42)] };
-      if (phase === 'browser') return { fg: 9, frontPid: 42, trusted: true, title: 'ChatGPT - Google Chrome', bundle: 'com.google.Chrome', wins: [win(9, 42), win(1, 7)] };
-      return { fg: 1, frontPid: 7, trusted: true, title: 'Capri', bundle: 'app.capri', wins: [win(9, 42), win(1, 7)] };
-    },
-    focus: () => {
-      if (phase === 'other') phase = 'browser';
-      return { ok: true, trusted: true, held: false };
-    },
-    script(text, cb) {
-      assert.match(text, /tell application "Google Chrome"/);
-      assert.match(text, /close active tab of front window/);
-      assert.doesNotMatch(text, /shift down|option down|control down/);
-      phase = 'gone';
-      cb(null, '');
-    },
-  });
-  assert.equal(await harness.watch.close(9, 'chatgpt'), '');
-  assert.equal(harness.scripts().length, 1);
-  assert.equal(harness.calls.some((call) => call.args[0] === 'close-tab'), false);
-  const focusAt = harness.calls.findIndex((call) => call.args[0] === 'focus');
-  const scriptAt = harness.calls.findIndex((call) => call.file.endsWith('osascript'));
-  assert.ok(focusAt >= 0 && focusAt < scriptAt);
-  assert.deepEqual(harness.calls[focusAt].args, ['focus', '42']);
-  assert.equal(harness.prompts.length, 0);
-  harness.watch.stop();
-});
-
-test('Safari uses its dictionary and Firefox gets Command-W with no extra modifiers', async () => {
-  for (const [bundle, title, app, expectScript] of [
-    ['com.apple.Safari', 'ChatGPT - Safari', 'Safari', /close current tab of front window/],
-    ['org.mozilla.firefox', 'ChatGPT - Firefox', 'Firefox', /keystroke "w" using command down/],
-  ]) {
-    let gone = false;
-    const harness = rivalClose({
-      snapshot: () => ({
-        fg: 9, frontPid: 42, trusted: true, bundle,
-        title: gone ? `New Tab - ${app}` : title, wins: [win(9, 42)],
-      }),
-      focus: () => ({ ok: true, trusted: true, held: false }),
-      script(text, cb) {
-        assert.match(text, expectScript);
-        assert.match(text, new RegExp(app));
-        assert.doesNotMatch(text, /shift down|option down|control down/);
-        gone = true;
-        cb(null, '');
+  assert.equal(await watch.close(9, 'chatgpt'), '');
+  assert.equal(calls.at(-1)[0], 'close-tab');
+  assert.equal(await watch.close(3, 'chatgpt'), 'front');
+  const denied = load('macos.js', 'darwin', {
+    electron: { app: { isPackaged: false } },
+    'node:child_process': {
+      spawn() { throw new Error('watch not used'); },
+      execFile(_file, args, _opts, done) {
+        done(null, JSON.stringify({ fg: 9, trusted: false, wins: [] }));
       },
-    });
-    assert.equal(await harness.watch.close(9, 'chatgpt'), '');
-    assert.equal(harness.calls.some((call) => call.args[0] === 'close-tab'), false);
-    if (bundle.includes('firefox')) assert.equal(harness.scripts().some((text) => /close active tab|close current tab/.test(text)), false);
-    harness.watch.stop();
-  }
-});
-
-test('the last rival tab counts as closed once its window is gone', async () => {
-  let closed = false;
-  const harness = rivalClose({
-    snapshot: () => ({
-      fg: closed ? 1 : 9, frontPid: closed ? 7 : 42, trusted: true,
-      title: closed ? 'Capri' : 'ChatGPT - Google Chrome',
-      bundle: closed ? 'app.capri' : 'com.google.Chrome',
-      wins: closed ? [win(1, 7)] : [win(9, 42)],
-    }),
-    focus: () => ({ ok: true, trusted: true, held: false }),
-    script(_text, cb) { closed = true; cb(null, ''); },
-  });
-  assert.equal(await harness.watch.close(9, 'chatgpt'), '');
-  assert.equal(harness.calls.some((call) => call.args[0] === 'close-tab'), false);
-  harness.watch.stop();
-});
-
-test('System Events can name the front page when the helper is not trusted', async () => {
-  let gone = false;
-  const harness = rivalClose({
-    snapshot: () => ({ fg: 9, frontPid: 42, trusted: false, wins: [win(9, 42)] }),
-    focus: () => ({ ok: true, trusted: false, held: false }),
-    script(text, cb) {
-      if (text.includes('bundle identifier')) {
-        cb(null, `${gone ? 'com.google.Chrome\nNew Tab - Google Chrome' : 'com.google.Chrome\nChatGPT - Google Chrome'}\n`);
-        return;
-      }
-      assert.match(text, /close active tab of front window/);
-      assert.doesNotMatch(text, /shift down|option down|control down/);
-      gone = true;
-      cb(null, '');
     },
   });
-  assert.equal(await harness.watch.close(9, 'chatgpt'), '');
-  assert.equal(harness.calls.some((call) => call.args[0] === 'close-tab'), false);
-  assert.equal(harness.prompts.length, 0);
-  harness.watch.stop();
-});
-
-test('a held Shift, Option, or Control key blocks the tab close', async () => {
-  const harness = rivalClose({
-    snapshot: () => ({
-      fg: 9, frontPid: 42, trusted: true, title: 'ChatGPT - Google Chrome', bundle: 'com.google.Chrome', wins: [win(9, 42)],
-    }),
-    focus: () => ({ ok: true, trusted: true, held: true }),
-    script(_text, cb) { cb(new Error('script should not run')); },
-  });
-  assert.equal(await harness.watch.close(9, 'chatgpt'), 'keys');
-  assert.equal(harness.scripts().length, 0);
-  assert.equal(harness.calls.some((call) => call.args[0] === 'close-tab'), false);
-  harness.watch.stop();
-});
-
-test('missing permission is reported and a refused browser command falls back to the keystroke', async () => {
-  const denied = rivalClose({
-    snapshot: () => ({ fg: 9, frontPid: 42, trusted: false, wins: [win(9, 42)] }),
-    focus: () => ({ ok: true, trusted: false, held: false }),
-    script(text, cb) {
-      assert.match(text, /bundle identifier/);
-      const err = new Error('Not authorized to send Apple events to System Events. (-1743)');
-      cb(err, '', err.message);
-    },
-  });
-  assert.equal(await denied.watch.close(9, 'chatgpt'), 'access');
-  assert.deepEqual(denied.prompts, [true]);
-  assert.equal(denied.scripts().some((text) => /keystroke|close active tab/.test(text)), false);
-  denied.watch.stop();
-
-  let gone = false;
-  let shots = 0;
-  const fallback = rivalClose({
-    snapshot: () => ({
-      fg: 9, frontPid: 42, trusted: true, bundle: 'com.google.Chrome', wins: [win(9, 42)],
-      title: gone ? 'New Tab - Google Chrome' : 'ChatGPT - Google Chrome',
-    }),
-    focus: () => ({ ok: true, trusted: true, held: false }),
-    script(text, cb) {
-      shots += 1;
-      if (text.includes('close active tab')) {
-        const err = new Error('Not authorized to send Apple events to Google Chrome. (-1743)');
-        cb(err, '', err.message);
-        return;
-      }
-      assert.match(text, /keystroke "w" using command down/);
-      assert.doesNotMatch(text, /shift down|option down|control down/);
-      gone = true;
-      cb(null, '');
-    },
-  });
-  assert.equal(await fallback.watch.close(9, 'chatgpt'), '');
-  assert.ok(shots >= 2);
-  assert.equal(fallback.calls.some((call) => call.args[0] === 'close-tab'), false);
-  assert.equal(fallback.prompts.length, 0);
-  fallback.watch.stop();
-});
-
-test('she does not claim a tab closed while that page is still in front', async () => {
-  const harness = rivalClose({
-    snapshot: () => ({
-      fg: 9, frontPid: 42, trusted: true, title: 'ChatGPT - Google Chrome', bundle: 'com.google.Chrome', wins: [win(9, 42)],
-    }),
-    focus: () => ({ ok: true, trusted: true, held: false }),
-    script(_text, cb) { cb(null, ''); },
-    keyed: () => ({ ok: false, why: 'front' }),
-  });
-  assert.equal(await harness.watch.close(9, 'chatgpt'), 'late');
-  assert.equal(harness.scripts().length, 1);
-  assert.doesNotMatch(harness.scripts()[0], /keystroke/);
-  assert.equal(harness.prompts.length, 0);
-  harness.watch.stop();
-});
-
-test('a missing macOS permission is said out loud when a rival tab stays open', async (t) => {
-  globalThis.matchMedia = () => ({ matches: false, addEventListener() {} });
-  globalThis.localStorage = { getItem: () => null, setItem() {} };
-  const timers = [];
-  const realInterval = global.setInterval;
-  global.setInterval = (fn, ms) => { const id = realInterval(fn, ms); timers.push(id); return id; };
-  t.after(() => {
-    for (const id of timers) clearInterval(id);
-    global.setInterval = realInterval;
-    delete globalThis.localStorage;
-    delete globalThis.matchMedia;
-  });
-  const { Jealousy } = await import(browserModule(path.resolve(__dirname, '../src/renderer/js/bond.js')));
-  const said = [];
-  const jealousy = new Jealousy({
-    capri: { windows: { wins: [{ id: 9 }] }, jealous: async () => true, zapShut: async (_win, onHit) => onHit() },
-    panel: { say: (line) => said.push(line), hide: () => said.push('hide') },
-    brain: { t: { jealous: { close: ['Closing {rival}.'], download: ['No {rival}.'], spared: ['Fine.'], spare: 'Let me', closed: ['Closed.'], blocked: 'NEED ACCESS' } } },
-    bond: { stage: 1, feel() {} }, chat: {}, guide: {}, host: {},
-  });
-  for (const id of timers) clearInterval(id);
-  jealousy.warn = async () => false;
-  jealousy.front = { id: 9, key: 'chatgpt', page: 'site' };
-  jealousy.shut = async () => 'access';
-  assert.equal(await jealousy.chase({ key: 'chatgpt', id: 9, page: 'site' }, { id: 9 }), 'access');
-  assert.equal(said.some((line) => line === 'hide'), false);
-  assert.equal(said.at(-1).line, 'NEED ACCESS');
-  assert.equal(said.at(-1).face, 'aside');
+  const quiet = denied.startWindowWatch({ overlay: {
+    isDestroyed: () => true, getMediaSourceId: () => 'window:1:0',
+    getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
+  }, onUpdate() {} });
+  assert.equal(await quiet.close(9, 'chatgpt'), 'keys');
+  watch.stop();
+  quiet.stop();
 });

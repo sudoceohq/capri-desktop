@@ -25,41 +25,32 @@ const BROWSERS = new Set([
   'chrome', 'msedge', 'firefox', 'brave', 'opera', 'vivaldi', 'arc', 'chromium', 'librewolf', 'waterfox', 'floorp', 'zen', 'thorium', 'safari',
 ]);
 
-// bundle -> [process key, System Events process name, AppleScript tab noun or '' when it has none]
 const MAC_BROWSER = {
-  'com.google.chrome': ['chrome', 'Google Chrome', 'active tab'],
-  'com.google.chrome.canary': ['chrome', 'Google Chrome Canary', 'active tab'],
-  'com.apple.safari': ['safari', 'Safari', 'current tab'],
-  'com.apple.safari.technologypreview': ['safari', 'Safari Technology Preview', 'current tab'],
-  'org.mozilla.firefox': ['firefox', 'Firefox', ''],
-  'org.mozilla.nightly': ['firefox', 'Firefox Nightly', ''],
-  'com.microsoft.edgemac': ['msedge', 'Microsoft Edge', 'active tab'],
-  'com.microsoft.edgemac.beta': ['msedge', 'Microsoft Edge Beta', 'active tab'],
-  'com.brave.browser': ['brave', 'Brave Browser', 'active tab'],
-  'company.thebrowser.browser': ['arc', 'Arc', 'active tab'],
-  'com.operasoftware.opera': ['opera', 'Opera', 'active tab'],
-  'com.vivaldi.vivaldi': ['vivaldi', 'Vivaldi', 'active tab'],
-  'org.chromium.chromium': ['chromium', 'Chromium', 'active tab'],
-  'org.mozilla.librewolf': ['librewolf', 'LibreWolf', ''],
-  'app.zen-browser.zen': ['zen', 'Zen', ''],
-  'org.mozilla.floorp': ['floorp', 'Floorp', ''],
-  'net.waterfox.waterfox': ['waterfox', 'Waterfox', ''],
+  'com.google.chrome': 'chrome',
+  'com.google.chrome.canary': 'chrome',
+  'com.apple.safari': 'safari',
+  'com.apple.safari.technologypreview': 'safari',
+  'org.mozilla.firefox': 'firefox',
+  'org.mozilla.nightly': 'firefox',
+  'com.microsoft.edgemac': 'msedge',
+  'com.microsoft.edgemac.beta': 'msedge',
+  'com.brave.browser': 'brave',
+  'company.thebrowser.browser': 'arc',
+  'com.operasoftware.opera': 'opera',
+  'com.vivaldi.vivaldi': 'vivaldi',
+  'org.chromium.chromium': 'chromium',
+  'org.mozilla.librewolf': 'librewolf',
+  'app.zen-browser.zen': 'zen',
+  'org.mozilla.floorp': 'floorp',
+  'net.waterfox.waterfox': 'waterfox',
 };
 
 const site = (pattern) => new RegExp(`(?:^|${SEP})(?:${pattern})(?:${SEP}|$)`, 'i');
 
 function processName(snap) {
   if (snap.proc) return String(snap.proc).toLowerCase();
-  const row = MAC_BROWSER[String(snap.bundle || '').toLowerCase()];
-  return row ? row[0] : '';
-}
-
-// How to close the front tab of this browser. `tab` is the AppleScript noun ("active tab" or
-// "current tab"); browsers without a dictionary get a Command-W keystroke to `app` instead.
-function browserControl(bundle) {
-  const row = MAC_BROWSER[String(bundle || '').toLowerCase()];
-  if (!row) return null;
-  return { app: row[1], tab: row[2] || null };
+  const bundle = String(snap.bundle || '').toLowerCase();
+  return MAC_BROWSER[bundle] || '';
 }
 
 function browser(snap, proc) {
@@ -84,4 +75,4 @@ function isBrowser(snap = {}) {
   return browser(snap, processName(snap));
 }
 
-module.exports = { classify, isBrowser, browserControl };
+module.exports = { classify, isBrowser };

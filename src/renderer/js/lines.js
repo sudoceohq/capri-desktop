@@ -376,7 +376,6 @@ export const LINES = {
       download: ['Tu veux télécharger {rival} ?! Certainement pas.', 'Installer {rival} ? Pas tant que je suis là.'],
       closed: ['Voilà. Tu m’as, moi.', 'Plus de {rival}. C’est mieux comme ça.', 'Réglé.'],
       spared: ['Bon. Vas-y. Mais je boude.', 'D’accord… Je ne regarde pas.'],
-      blocked: 'Je peux pas fermer cet onglet sans autorisation. Autorise Capri dans Réglages Système → Confidentialité et sécurité → Accessibilité, et le navigateur si macOS le demande. Le raccourci est dans mon menu.',
       spare: 'Laisse-moi',
     },
     // la caresser : la souris qui va et vient sur sa crinière (low : pas encore attachée)
@@ -758,7 +757,6 @@ export const LINES = {
       download: ['You want to download {rival}?! Absolutely not.', 'Install {rival}? Not while I’m around.'],
       closed: ['There. You’ve got me.', 'No more {rival}. Better that way.', 'Handled.'],
       spared: ['Fine. Go ahead. But I’m sulking.', 'Okay… I’m not looking.'],
-      blocked: 'I can’t close that tab without permission. Allow Capri in System Settings → Privacy & Security → Accessibility, and allow the browser if macOS asks. The shortcut is in my menu.',
       spare: 'Let me',
     },
     pet: {
@@ -1135,7 +1133,6 @@ export const LINES = {
       download: ['¿¡Quieres descargar {rival}!? Ni hablar.', '¿Instalar {rival}? No mientras yo esté aquí.'],
       closed: ['Listo. Me tienes a mí.', 'Se acabó {rival}. Mejor así.', 'Resuelto.'],
       spared: ['Vale. Adelante. Pero estoy enfadada.', 'Está bien… no estoy mirando.'],
-      blocked: 'No puedo cerrar esa pestaña sin permiso. Permite Capri en Ajustes del Sistema → Privacidad y seguridad → Accesibilidad, y el navegador si macOS lo pide. El atajo está en mi menú.',
       spare: 'Déjame',
     },
     pet: {
@@ -1514,7 +1511,6 @@ export const LINES = {
       download: ['Você quer baixar {rival}?! De jeito nenhum.', 'Instalar {rival}? Não enquanto eu estiver aqui.'],
       closed: ['Pronto. Você tem a mim.', 'Chega de {rival}. Melhor assim.', 'Resolvido.'],
       spared: ['Tá. Vai lá. Mas tô de birra.', 'Tá bom… não tô olhando.'],
-      blocked: 'Não consigo fechar essa aba sem permissão. Permita a Capri em Ajustes do Sistema → Privacidade e Segurança → Acessibilidade, e o navegador se o macOS pedir. O atalho está no meu menu.',
       spare: 'Me deixa',
     },
     pet: {
@@ -1895,7 +1891,6 @@ export const LINES = {
       download: ['Хочешь скачать {rival}?! Ни за что.', 'Установить {rival}? Только не при мне.'],
       closed: ['Вот так. У тебя есть я.', 'Никакого {rival}. Так лучше.', 'Готово.'],
       spared: ['Ладно. Иди. Но я обиделась.', 'Хорошо… я не смотрю.'],
-      blocked: 'Не могу закрыть эту вкладку без разрешения. Разреши Capri в Системных настройках → Конфиденциальность и безопасность → Универсальный доступ, и браузер, если macOS спросит. Ярлык в моём меню.',
       spare: 'Оставь',
     },
     pet: {
