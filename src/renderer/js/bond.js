@@ -348,7 +348,10 @@ export class Jealousy {
       if (why === '') this.panel.say({ kind: 'info', face: 'smug', line: fmt(pick(t.closed), { rival }), hold: 3500 });
       return why;
     });
-    if (why !== '') this.panel.hide(); // not closed: a key held down, say
+    if (why === 'access') {
+      this.wait[key] = Date.now() + 15000; // she tries again once the permission is on
+      this.panel.say({ kind: 'info', face: 'aside', line: this.t.blocked, hold: 7000 });
+    } else if (why !== '') this.panel.hide(); // not closed: a key held down, say
     return why || 'closed';
   }
 
