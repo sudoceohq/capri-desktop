@@ -75,14 +75,21 @@ func windowGeometry(excluding windowID: Int) -> [String: Any] {
               let alpha = row[kCGWindowAlpha as String] as? Double, alpha > 0,
               let bounds = row[kCGWindowBounds as String] as? NSDictionary,
               let rect = CGRect(dictionaryRepresentation: bounds), rect.width >= 200, rect.height >= 120 else { continue }
-        if foreground == 0, row[kCGWindowOwnerPID as String] as? Int32 == frontPID { foreground = id }
+        let owner = row[kCGWindowOwnerPID as String]
+        let pid: Int
+        if let n = owner as? Int { pid = n }
+        else if let n = owner as? Int32 { pid = Int(n) }
+        else if let n = owner as? NSNumber { pid = n.intValue }
+        else { pid = 0 }
+        // Owner pid arrives as Int, Int32, or NSNumber. The same value has to decide which window is front.
+        if foreground == 0, let front = frontPID, pid > 0, pid == Int(front) { foreground = id }
         // Quartz and Electron both use logical points with a top-left primary-display origin.
         let maximized = displays.contains { display in
             let full = display.bounds
             return abs(rect.minX - full.minX) < 2 && abs(rect.width - full.width) < 2
                 && rect.height >= display.workHeight - 2
         }
-        windows.append(["id": id, "x": rect.minX, "y": rect.minY,
+        windows.append(["id": id, "pid": pid, "x": rect.minX, "y": rect.minY,
                         "w": rect.width, "h": rect.height, "max": maximized])
         if windows.count >= 40 { break }
     }
@@ -113,23 +120,62 @@ func frontInfo() -> (title: String, bundle: String, trusted: Bool) {
     return (titleRef as? String ?? "", bundle, trusted)
 }
 
-func closeTab() {
-    guard AXIsProcessTrusted(),
-          let source = CGEventSource(stateID: .hidSystemState),
+// Command-Shift-W closes the whole window, and Command-Option-W closes the other tabs.
+// Read at the moment of the decision. A saved flag from earlier in the zap would refuse a close
+// the keyboard is no longer holding, or miss one that is.
+func modifiersHeld() -> Bool {
+    let held = CGEventSource.flagsState(.hidSystemState)
+    return held.contains(.maskShift) || held.contains(.maskAlternate) || held.contains(.maskControl)
+}
+
+func focus(pid: Int32) {
+    if modifiersHeld() { emit(["ok": false, "why": "keys"]); return }
+    guard pid > 0, let target = NSRunningApplication(processIdentifier: pid), !target.isTerminated else {
+        emit(["ok": false, "why": "front"]); return
+    }
+    let activated = target.activate(options: [.activateIgnoringOtherApps])
+    let deadline = Date().addingTimeInterval(0.45)
+    while Date() < deadline && NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+    }
+    let front = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+    if modifiersHeld() { emit(["ok": false, "why": "keys"]); return }
+    emit(["ok": activated && front, "why": front ? "" : "front"])
+}
+
+func closeTab(pid: Int32) {
+    if modifiersHeld() { emit(["ok": false, "why": "keys"]); return }
+    guard AXIsProcessTrusted() else { emit(["ok": false, "why": "keys"]); return }
+    guard pid > 0, let target = NSRunningApplication(processIdentifier: pid), !target.isTerminated else {
+        emit(["ok": false, "why": "front"]); return
+    }
+    // The overlay can be key by the time the zap lands. Bring this browser back and do not
+    // send the key until it is the front app.
+    if NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+        target.activate(options: [.activateIgnoringOtherApps])
+        let deadline = Date().addingTimeInterval(0.45)
+        while Date() < deadline && NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        }
+    }
+    if NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+        emit(["ok": false, "why": "front"]); return
+    }
+    if modifiersHeld() { emit(["ok": false, "why": "keys"]); return }
+    guard let source = CGEventSource(stateID: .hidSystemState),
           let down = CGEvent(keyboardEventSource: source, virtualKey: 13, keyDown: true),
           let up = CGEvent(keyboardEventSource: source, virtualKey: 13, keyDown: false) else {
-        emit(["ok": false]); return
+        emit(["ok": false, "why": "keys"]); return
     }
-    // Command-Shift-W closes the whole window, and Command-Option-W closes the other tabs.
-    let held = CGEventSource.flagsState(.hidSystemState)
-    if held.contains(.maskShift) || held.contains(.maskAlternate) || held.contains(.maskControl) {
-        emit(["ok": false]); return
-    }
-    down.flags = .maskCommand // kVK_ANSI_W. Command-W closes the front browser tab.
+    down.flags = .maskCommand // kVK_ANSI_W, Command only.
     up.flags = .maskCommand
+    // This is the post that already closes a tab when the browser is front. Sending it to the pid
+    // instead is ignored by some browsers, so the key stays on the HID tap and only goes out now.
     down.post(tap: .cghidEventTap)
     up.post(tap: .cghidEventTap)
-    emit(["ok": true])
+    // The process used to exit before a posted key was delivered.
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.2))
+    emit(["ok": true, "why": ""])
 }
 
 func restoreFocus(owner: Int32, previous: Int32) {
@@ -220,7 +266,10 @@ case "restore-focus" where args.count == 3:
         restoreFocus(owner: owner, previous: previous)
     }
 case "close" where args.count == 3: closeApp(args[1], force: args[2] == "force")
-case "close-tab": closeTab()
+case "focus" where args.count == 2:
+    focus(pid: Int32(args[1]) ?? 0)
+case "close-tab":
+    closeTab(pid: Int32(args.count > 1 ? args[1] : "0") ?? 0)
 case "media" where args.count == 2: media(args[1])
 default:
     fputs("Unknown Capri helper command\n", stderr)

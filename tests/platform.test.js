@@ -98,8 +98,8 @@ test('macOS translations do not mutate any Windows or assistant wording', async 
 test('macOS watch coordinates stay in points, including negative displays', () => {
   const mac = load('macos.js', 'darwin', { electron: { app: { isPackaged: false } } });
   assert.deepEqual(mac.toOverlay({ fg: 12, wins: [
-    { id: 12, x: -1000, y: 60, w: 600, h: 400, max: false },
-    { id: 13, x: 500, y: 60, w: 600, h: 400, max: false },
+    { id: 12, pid: 9, x: -1000, y: 60, w: 600, h: 400, max: false },
+    { id: 13, pid: 4, x: 500, y: 60, w: 600, h: 400, max: false },
   ] }, { x: -1440, y: 25, width: 1440, height: 875 }), {
     fg: 12, ai: [], pages: [], dl: false, wins: [{ id: 12, x: 440, y: 35, w: 600, h: 400, max: false }],
   });
@@ -420,18 +420,16 @@ test('packaged macOS Codex hooks use the bundled runtime even without Node on PA
   assert.match(command, /capri-codex-hook\.js'$/);
 });
 
-test('macOS tab close sends Command-W only for the rival page still in front', async () => {
+function rivalClose(handler) {
   const calls = [];
   const mac = load('macos.js', 'darwin', {
     electron: { app: { isPackaged: false } },
     'node:child_process': {
       spawn() { throw new Error('watch not used'); },
-      execFile(_file, args, _opts, done) {
-        calls.push(args);
-        if (args[0] === 'close-tab') done(null, '{"ok":true}');
-        else done(null, JSON.stringify({
-          fg: 9, trusted: true, title: 'ChatGPT - Google Chrome', bundle: 'com.google.Chrome', wins: [],
-        }));
+      execFile(_file, args, opts, done) {
+        const cb = typeof opts === 'function' ? opts : done;
+        calls.push([...args]);
+        handler(args, cb);
       },
     },
   });
@@ -439,23 +437,187 @@ test('macOS tab close sends Command-W only for the rival page still in front', a
     isDestroyed: () => true, getMediaSourceId: () => 'window:1:0',
     getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
   }, onUpdate() {} });
-  assert.equal(await watch.close(9, 'chatgpt'), '');
-  assert.equal(calls.at(-1)[0], 'close-tab');
-  assert.equal(await watch.close(3, 'chatgpt'), 'front');
-  const denied = load('macos.js', 'darwin', {
-    electron: { app: { isPackaged: false } },
-    'node:child_process': {
-      spawn() { throw new Error('watch not used'); },
-      execFile(_file, args, _opts, done) {
-        done(null, JSON.stringify({ fg: 9, trusted: false, wins: [] }));
-      },
-    },
+  return { calls, watch };
+}
+const browserWin = (id, pid) => ({ id, pid, x: 0, y: 0, w: 800, h: 600, max: false });
+
+test('macOS tab close brings the browser forward and checks the tab is gone', async () => {
+  let phase = 'other';
+  const harness = rivalClose((args, cb) => {
+    const cmd = args[0];
+    if (cmd === 'snapshot') {
+      if (phase === 'gone') cb(null, JSON.stringify({
+        fg: 9, frontPid: 42, trusted: true, title: 'New Tab - Google Chrome', bundle: 'com.google.Chrome', wins: [browserWin(9, 42)],
+      }));
+      else if (phase === 'browser') cb(null, JSON.stringify({
+        fg: 9, frontPid: 42, trusted: true, title: 'ChatGPT - Google Chrome', bundle: 'com.google.Chrome', wins: [browserWin(9, 42)],
+      }));
+      else cb(null, JSON.stringify({
+        fg: 1, frontPid: 7, trusted: true, title: 'Capri', bundle: 'app.capri', wins: [browserWin(9, 42), browserWin(1, 7)],
+      }));
+      return;
+    }
+    if (cmd === 'focus') {
+      assert.deepEqual(args, ['focus', '42']);
+      phase = 'browser';
+      cb(null, JSON.stringify({ ok: true, why: '' }));
+      return;
+    }
+    if (cmd === 'close-tab') {
+      assert.deepEqual(args, ['close-tab', '42']);
+      phase = 'gone';
+      cb(null, JSON.stringify({ ok: true, why: '' }));
+      return;
+    }
+    cb(new Error(cmd));
   });
-  const quiet = denied.startWindowWatch({ overlay: {
-    isDestroyed: () => true, getMediaSourceId: () => 'window:1:0',
-    getBounds: () => ({ x: 0, y: 0, width: 1, height: 1 }),
-  }, onUpdate() {} });
-  assert.equal(await quiet.close(9, 'chatgpt'), 'keys');
-  watch.stop();
-  quiet.stop();
+  assert.equal(await harness.watch.close(9, 'chatgpt'), '');
+  const focusAt = harness.calls.findIndex((args) => args[0] === 'focus');
+  const keyAt = harness.calls.findIndex((args) => args[0] === 'close-tab');
+  assert.equal(harness.calls.filter((args) => args[0] === 'close-tab').length, 1);
+  assert.ok(focusAt >= 0 && focusAt < keyAt);
+  harness.watch.stop();
+});
+
+test('a missed tab close is retried once, and a held modifier is not a second key', async () => {
+  let sent = 0;
+  const missed = rivalClose((args, cb) => {
+    if (args[0] === 'snapshot') {
+      cb(null, JSON.stringify({
+        fg: 9, frontPid: 42, trusted: true, bundle: 'com.google.Chrome', wins: [browserWin(9, 42)],
+        title: sent >= 2 ? 'New Tab - Google Chrome' : 'ChatGPT - Google Chrome',
+      }));
+      return;
+    }
+    if (args[0] === 'focus') { cb(null, JSON.stringify({ ok: true, why: '' })); return; }
+    if (args[0] === 'close-tab') { sent += 1; cb(null, JSON.stringify({ ok: true, why: '' })); return; }
+    cb(new Error(args[0]));
+  });
+  assert.equal(await missed.watch.close(9, 'chatgpt'), '');
+  assert.equal(missed.calls.filter((args) => args[0] === 'close-tab').length, 2);
+  missed.watch.stop();
+
+  const held = rivalClose((args, cb) => {
+    if (args[0] === 'snapshot') {
+      cb(null, JSON.stringify({
+        fg: 9, frontPid: 42, trusted: true, title: 'ChatGPT - Google Chrome', bundle: 'com.google.Chrome', wins: [browserWin(9, 42)],
+      }));
+      return;
+    }
+    if (args[0] === 'focus') { cb(null, JSON.stringify({ ok: false, why: 'keys' })); return; }
+    cb(new Error(args[0]));
+  });
+  const logs = [];
+  const write = console.error;
+  console.error = (...args) => logs.push(args.join(' '));
+  try {
+    assert.equal(await held.watch.close(9, 'chatgpt'), 'keys');
+  } finally {
+    console.error = write;
+  }
+  assert.equal(held.calls.some((args) => args[0] === 'close-tab'), false);
+  assert.match(logs.join('\n'), /rival tab close gave up: keys/);
+  held.watch.stop();
+});
+
+test('macOS tab close gives up when the page is still there, and without Accessibility', async () => {
+  const stuck = rivalClose((args, cb) => {
+    if (args[0] === 'snapshot') {
+      cb(null, JSON.stringify({
+        fg: 9, frontPid: 42, trusted: true, title: 'ChatGPT - Google Chrome', bundle: 'com.google.Chrome', wins: [browserWin(9, 42)],
+      }));
+      return;
+    }
+    if (args[0] === 'focus') { cb(null, JSON.stringify({ ok: true, why: '' })); return; }
+    if (args[0] === 'close-tab') { cb(null, JSON.stringify({ ok: true, why: '' })); return; }
+    cb(new Error(args[0]));
+  });
+  const logs = [];
+  const write = console.error;
+  console.error = (...args) => logs.push(args.join(' '));
+  let why;
+  try {
+    why = await stuck.watch.close(9, 'chatgpt');
+  } finally {
+    console.error = write;
+  }
+  assert.equal(why, 'stuck');
+  assert.equal(stuck.calls.filter((args) => args[0] === 'close-tab').length, 2);
+  assert.match(logs.join('\n'), /rival tab close gave up: stuck/);
+  stuck.watch.stop();
+
+  const denied = rivalClose((args, cb) => {
+    cb(null, JSON.stringify({ fg: 9, trusted: false, wins: [] }));
+  });
+  const deniedLogs = [];
+  console.error = (...args) => deniedLogs.push(args.join(' '));
+  try {
+    assert.equal(await denied.watch.close(9, 'chatgpt'), 'keys');
+  } finally {
+    console.error = write;
+  }
+  assert.equal(denied.calls.some((args) => args[0] === 'close-tab' || args[0] === 'focus'), false);
+  assert.match(deniedLogs.join('\n'), /rival tab close gave up: keys/);
+  denied.watch.stop();
+});
+
+test('macOS tab close skips a window that is already gone, and a browser that never comes forward', async () => {
+  const gone = rivalClose((args, cb) => {
+    if (args[0] === 'snapshot') {
+      cb(null, JSON.stringify({
+        fg: 3, frontPid: 8, trusted: true, title: 'Inbox - Google Chrome', bundle: 'com.google.Chrome',
+        wins: [browserWin(3, 8)],
+      }));
+      return;
+    }
+    cb(new Error(args[0]));
+  });
+  assert.equal(await gone.watch.close(9, 'chatgpt'), '');
+  assert.equal(gone.calls.some((args) => args[0] === 'focus' || args[0] === 'close-tab'), false);
+  gone.watch.stop();
+
+  const behind = rivalClose((args, cb) => {
+    if (args[0] === 'snapshot') {
+      cb(null, JSON.stringify({
+        fg: 1, frontPid: 7, trusted: true, title: 'Capri', bundle: 'app.capri',
+        wins: [browserWin(9, 42), browserWin(1, 7)],
+      }));
+      return;
+    }
+    if (args[0] === 'focus') { cb(null, JSON.stringify({ ok: false, why: 'front' })); return; }
+    cb(new Error(args[0]));
+  });
+  const logs = [];
+  const write = console.error;
+  console.error = (...args) => logs.push(args.join(' '));
+  try {
+    assert.equal(await behind.watch.close(9, 'chatgpt'), 'front');
+  } finally {
+    console.error = write;
+  }
+  assert.equal(behind.calls.filter((args) => args[0] === 'focus').length, 2);
+  assert.equal(behind.calls.some((args) => args[0] === 'close-tab'), false);
+  assert.match(logs.join('\n'), /rival tab close gave up: front/);
+  behind.watch.stop();
+});
+
+test('a tab that closes late is not given a second key', async () => {
+  let shots = 0;
+  let sent = 0;
+  const late = rivalClose((args, cb) => {
+    if (args[0] === 'snapshot') {
+      shots += 1;
+      cb(null, JSON.stringify({
+        fg: 9, frontPid: 42, trusted: true, bundle: 'com.google.Chrome', wins: [browserWin(9, 42)],
+        title: shots >= 5 ? 'New Tab - Google Chrome' : 'ChatGPT - Google Chrome',
+      }));
+      return;
+    }
+    if (args[0] === 'focus') { cb(null, JSON.stringify({ ok: true, why: '' })); return; }
+    if (args[0] === 'close-tab') { sent += 1; cb(null, JSON.stringify({ ok: true, why: '' })); return; }
+    cb(new Error(args[0]));
+  });
+  assert.equal(await late.watch.close(9, 'chatgpt'), '');
+  assert.equal(sent, 1);
+  late.watch.stop();
 });

@@ -22,10 +22,32 @@ function run(command, ...args) {
 // No pixel conversion on macOS: Quartz window bounds and Electron bounds are both points.
 // `title` and `bundle` stay here. The overlay only hears which rival matched.
 function toOverlay(snap, bounds) {
-  const wins = snap.wins.map((w) => ({ ...w, x: w.x - bounds.x, y: w.y - bounds.y }))
+  const wins = snap.wins.map(({ pid, ...w }) => ({ ...w, x: w.x - bounds.x, y: w.y - bounds.y }))
     .filter((w) => w.x < bounds.width && w.x + w.w > 0 && w.y < bounds.height && w.y + w.h > 0);
   const flags = classify(snap);
   return { fg: snap.fg, ai: flags.ai, pages: flags.pages, dl: flags.dl, wins };
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function targetPid(snap, id) {
+  const win = (snap.wins || []).find((w) => Number(w.id) === Number(id));
+  const fromWin = Number(win?.pid) || 0;
+  if (fromWin > 0) return fromWin;
+  if (Number(snap.fg) === Number(id)) return Number(snap.frontPid) || 0;
+  return 0;
+}
+
+function rivalPage(snap, key) {
+  const flags = classify(snap);
+  return flags.pages.includes(key) || (Boolean(flags.dl) && flags.ai.includes(key));
+}
+
+function pageClosed(id, snap, key) {
+  if (!Array.isArray(snap?.wins)) return false;
+  if (!snap.wins.some((w) => Number(w.id) === Number(id))) return true;
+  if (!snap.trusted || Number(snap.fg) !== Number(id)) return false;
+  return !rivalPage(snap, key);
 }
 
 function startWindowWatch({ overlay, onUpdate }) {
@@ -64,20 +86,42 @@ function startWindowWatch({ overlay, onUpdate }) {
   return {
     restoreFocus() { return previousApp ? run('restore-focus', process.pid, previousApp) : Promise.resolve(); },
     refresh: send,
-    // Close one rival's browser tab (Command-W) only while that page is still in front.
+    // The zap can land after Capri's window is key, and a global Command-W then misses the browser.
+    // Bring that app forward, send Command-W only while its page is front, and try once more.
     async close(id, key) {
-      let snap;
-      try { snap = await run('snapshot', '0'); } catch { return 'gone'; }
-      if (!snap.trusted) return 'keys';
-      if (Number(snap.fg) !== Number(id)) return 'front';
-      if (!isBrowser(snap)) return 'browser';
-      const flags = classify(snap);
-      const page = flags.pages.includes(key) || (flags.dl && flags.ai.includes(key));
-      if (!page) return 'page';
-      try {
-        const res = await run('close-tab');
-        return res.ok ? '' : 'keys';
-      } catch { return 'gone'; }
+      const once = async () => {
+        let snap;
+        try { snap = await run('snapshot', '0'); } catch { return 'gone'; }
+        if (Array.isArray(snap.wins) && snap.wins.length && !snap.wins.some((w) => Number(w.id) === Number(id))) return '';
+        const pid = targetPid(snap, id);
+        if (!pid) return snap.trusted ? 'front' : 'keys';
+        let raised;
+        try { raised = await run('focus', pid); } catch { return 'gone'; }
+        if (raised.why === 'keys') return 'keys';
+        if (!raised.ok) return raised.why || 'front';
+        try { snap = await run('snapshot', '0'); } catch { return 'gone'; }
+        if (!snap.trusted) return 'keys';
+        if (Number(snap.fg) !== Number(id)) return 'front';
+        if (!isBrowser(snap)) return 'browser';
+        if (!rivalPage(snap, key)) return 'page';
+        let sent;
+        try { sent = await run('close-tab', pid); } catch { return 'gone'; }
+        if (sent.why === 'keys') return 'keys';
+        if (!sent.ok) return sent.why || 'front';
+        try { snap = await run('snapshot', '0'); } catch { return 'gone'; }
+        if (pageClosed(id, snap, key)) return '';
+        await sleep(250);
+        try { snap = await run('snapshot', '0'); } catch { return 'gone'; }
+        return pageClosed(id, snap, key) ? '' : 'stuck';
+      };
+      let why = await once();
+      if (why !== '') {
+        const again = await once();
+        // The first key can land just after its check. A different page, or no window, is the close.
+        why = again === '' || (why === 'stuck' && again === 'page') ? '' : again;
+      }
+      if (why !== '') console.error(`[capri] rival tab close gave up: ${why}`);
+      return why;
     },
     stop() { stopped = true; clearTimeout(retry); child?.kill(); },
   };
