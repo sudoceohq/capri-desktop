@@ -167,7 +167,7 @@ edit files without asking. **Forget our conversations** clears what she remember
 **It's AI.** Her replies are written by the model, not by the show's writers: it's a fan version of her, and the chat
 panel says so every time.
 
-**What she can do on your PC** (Windows), when you ask her in the chat:
+**What she can do on your computer**, when you ask her in the chat. On macOS the same requests are carried out with System Settings, `osascript`, `pmset`, and the Swift helper. Epic games, the Start menu, and USB reactions stay Windows-only. See [docs/macos.md](docs/macos.md).
 
 - **Open an app or a game**: anything in your Start menu (Store apps like Spotify included), your Steam and Epic
   games ("open Spotify", "launch Brawlhalla"). Named in your own words, it opens right away; if only her AI came up
@@ -292,6 +292,18 @@ own. You can choose another one in her menu.
 
 Her menu: **right-click her**. It's also on her tray icon, which Windows 11 often hides behind the **^** next to the clock.
 
+### macOS (unsigned DMG)
+
+Build it with `npm run dist:mac`, or download the DMG from this repository's Actions artifacts (`Capri-macOS-test`). Open the DMG and drag Capri to Applications. The build is ad-hoc signed and not notarized, so Gatekeeper blocks the first open. Control-click the app, choose **Open**, then **Open** again. Or run `xattr -cr /Applications/Capri.app`.
+
+Permissions, only when a feature needs them:
+
+- **Accessibility** for media keys, placing or hiding windows, dark mode, and closing another AI's browser tab. The app does not ask at launch. The menu item for media controls opens that pane.
+- **Screen Recording** if you ask her to look at the screen or to snip.
+- **Automation** if she opens Terminal for a coding assistant, or changes System Settings behavior such as dark mode.
+
+Details and the manual checks are in [docs/macos.md](docs/macos.md).
+
 ### What's Claude Code? Do I need it?
 
 [Claude Code](https://code.claude.com/docs/en/quickstart) is Anthropic's coding assistant: in a terminal, in VS Code,
@@ -312,9 +324,10 @@ npm install
 npm start
 ```
 
-Keep that terminal open while she runs. Not tested on macOS or Linux yet: she should start, but the window tricks
-(sitting on your windows, possessing them, showing Claude's answer when you're elsewhere) are Windows-only, and on Linux
-the transparent overlay works best on X11 (Wayland can struggle with click-through windows).
+Keep that terminal open while she runs. On macOS, source builds also need Apple's Command Line Tools
+(`xcode-select --install`) to compile the native helper. See [macOS setup, packaging, and testing](docs/macos.md)
+for requirements and validation status. Linux is still untested; the transparent overlay works best on X11
+(Wayland can struggle with click-through windows), and window tracking and app controls are not implemented there.
 
 ### Hook her up to Claude Code by hand
 
@@ -339,8 +352,11 @@ for Claude Code. Then:
 - **Antigravity**: start a new conversation. Her hooks go in `~/.gemini/config/hooks.json`.
 
 She follows one of them at a time, the one picked in her menu, and her lines, her guide and her chat use its name.
-She only watches: when Codex or Antigravity asks for approval, you still answer it there. From the command line:
-`npm run hooks:codex:install` or `npm run hooks:agy:install` (`:uninstall` to remove them), and `npm run test:hooks`
+She only watches: when Codex or Antigravity asks for approval, you still answer it there.
+
+Codex permission checks appear as brief status messages: that hook runs before resolution and cannot tell Capri whether a human prompt remains. Explicit Codex questions still raise an attention alert.
+
+From the command line: `npm run hooks:codex:install` or `npm run hooks:agy:install` (`:uninstall` to remove them), and `npm run test:hooks`
 runs the tests of both adapters. **Watch** › **Nothing, just keep me company**: she stops talking about any of them.
 
 ### Try it without Claude
@@ -495,7 +511,9 @@ tools/build-sprite.py    rebuilds the sprite from the original cut-out (Python +
 tools/build-cutins.py    cuts the cut-ins and her faces out of frames of the show
 tools/build-intro.py     cuts her intro's close-ups out of their background, all the same way
 src/main/                Electron: full-screen transparent click-through window, tray, local HTTP bridge
-  windows.js / .ps1      where the other windows are (Windows only), so she can sit on them
+  windows.js / .ps1      where the other windows are, so she can sit on them (PowerShell on Windows, the Swift helper on macOS)
+  macos.js               macOS helper: windows, apps, media keys, focus
+  system.js              what her chat can do to the computer (settings, sound, power)
   ollama.js              her chat: the local model through Ollama, or one of its cloud models
   apps.js                closing an app you asked her to close (after your click)
 src/renderer/js/
@@ -522,7 +540,7 @@ To hack on it: `npm run dev` turns on debug routes on the bridge (`/debug/captur
 `/debug/testwin` opens test windows she can sit on, one per name, `/debug/mouse` moves and clicks a stand-in pointer
 over Capri's window, without touching the real one, `/debug/type` types in her chat, `/debug/menu` lists her menu and
 can click an item of it).
-`npm run dist` builds the Windows installer in `dist/`.
+`npm run dist` and `npm run dist:win` build the Windows installer in `dist/`. `npm run dist:mac` builds a universal DMG and ZIP. `npm run dist:linux` builds an AppImage and a deb.
 
 ## Credits and rights
 

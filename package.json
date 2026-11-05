@@ -18,7 +18,15 @@
     "hooks:agy:uninstall": "node scripts/install-hooks-agy.js --uninstall",
     "check:llm": "node scripts/check-llm.js",
     "test:hooks": "node --test tests/hooks.test.js",
-    "dist": "electron-builder --win"
+    "dist": "electron-builder --win",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux",
+    "native:mac": "node scripts/build-macos.js",
+    "prestart": "node scripts/build-macos.js",
+    "predev": "node scripts/build-macos.js",
+    "dist:mac": "node scripts/build-macos.js --universal && electron-builder --mac --universal",
+    "test:platform": "node --test tests/platform.test.js",
+    "test": "node --test tests/*.test.js"
   },
   "keywords": [
     "claude-code",
@@ -65,6 +73,35 @@
       "createDesktopShortcut": true,
       "shortcutName": "Capri",
       "artifactName": "Capri-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": "universal" },
+        { "target": "zip", "arch": "universal" }
+      ],
+      "category": "public.app-category.entertainment",
+      "minimumSystemVersion": "13.0",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "icon": "assets/icons/capri.icns",
+      "extraResources": [
+        {
+          "from": "native/bin/capri-macos",
+          "to": "capri-macos"
+        }
+      ],
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Capri opens Terminal and System Settings only when you ask.",
+        "NSScreenCaptureUsageDescription": "Capri takes a picture of the screen only when you ask her to look or to snip.",
+        "NSAudioCaptureUsageDescription": "macOS requires this description before an app can capture the screen. Capri does not record the microphone."
+      }
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/icons/capri.png",
+      "category": "Utility",
+      "artifactName": "Capri-${version}-${arch}.${ext}"
     }
   }
 }

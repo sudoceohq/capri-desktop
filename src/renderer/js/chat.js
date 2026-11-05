@@ -36,7 +36,7 @@ const MEDIA_ASK = [
   ['pause', /\b(pause|pausa|pausar)\b|stop (the )?music|arrête la musique|пауз/i],
   ['next', /\b(next|skip|suivante?|siguiente|próxima|proxima)\b|passe (à )?la suivante|salta|pula|следующ/i],
   ['previous', /\b(previous|précédente?|anterior)\b|предыдущ/i],
-  ['play', /\b(resume|reprends|reanuda|retoma)\b|relance la musique|remets la musique|продолж/i],
+  ['play', /\b(resume|unpause|reprends|reanuda|retoma)\b|relance la musique|remets la musique|продолж|\bplay\b[\s\S]{0,48}\b(?:paused|apple music|the media|whatever media)\b/i],
   ['volup', /\b(louder|plus fort)\b|monte le son|turn (it )?up|sube el volumen|aumenta o volume|громче/i],
   ['voldown', /\b(quieter|moins fort)\b|baisse le son|turn (it )?down|baja el volumen|abaixa o volume|тише/i],
   ['mute', /\bmute\b|coupe le son|silencia|sem som|выключи звук/i],
@@ -99,6 +99,8 @@ const INFO_ASK = [
 const QUESTION = /\?|combien|\bquel(?:le)?\b|c['’]est quoi|\breste\b|how much|how many|what(?:'s| is)|\bleft\b|cu[aá]nt|\bqu[eé]\b|quanto|\bqual\b|сколько|как(?:ой|ая|ое)|осталось/i;
 // its sound: "mets le son à 30 %", "volume 50"; off and back on
 const VOLUME_ASK = /(?:\bson\b|volume|\bsound\b|volumen|\bsom\b|звук|громкост\w*)\D{0,14}?(\d{1,3})\s*(?:%|pour ?cent|percent|por ?ciento|por ?cento|процент)?/i;
+const VOLUME_UP = /volume up|turn (?:the )?volume up|raise (?:the )?volume|\blouder\b|plus fort|monte le (?:son|volume)|sube el volumen|aumenta o volume|громче/i;
+const VOLUME_DOWN = /volume down|turn (?:the )?volume down|lower (?:the )?volume|\bquieter\b|moins fort|baisse le (?:son|volume)|baja el volumen|abaixa o volume|тише/i;
 const MUTE_ASK = /coupe le son|mets? (?:le son )?en muet|\bmute\b|silencia|tira o som|sem som|выключи звук/i;
 const UNMUTE_ASK = /remets? le son|r[ée]active le son|unmute|sound (?:back )?on|quita el silencio|activa el sonido|volta o som|liga o som|включи звук/i;
 // a timer, counted down in her ticker
@@ -106,9 +108,10 @@ const TIMER_ASK = /minuteur|\btimer\b|temporizador|cron[oó]metro|таймер/i
 // Windows' snip of an area (not her own screenshot of all of it)
 const SNIP_ASK = /capture (?:d['’])?une (?:zone|partie)|zone de l['’][ée]cran|\bsnip\b|(?:capture|screenshot|captura) (?:of |de )?(?:an? |una |uma |la |a )?(?:area|region|part|zona|[aá]rea|parte)|снимок области|область экрана/i;
 // its windows: out of the way, back, or side by side
-const TIDY_ASK = /range (?:mes|les|toutes les) fen[êe]tres|cache (?:mes|les|toutes les) fen[êe]tres|montre(?:-moi)? (?:le|mon) bureau|r[ée]duis (?:tout|toutes les fen[êe]tres)|tidy (?:up )?(?:my |the )?windows|minimi[sz]e (?:all|everything|my windows|the windows)|show (?:me )?(?:the |my )?desktop|ordena (?:mis |las )?ventanas|minimiza (?:todo|todas)|muestra el escritorio|organiza (?:minhas |as )?janelas|minimiza tudo|mostra a [áa]rea de trabalho|сверни (?:все|окна)|убери окна|покажи рабочий стол/i;
+const TIDY_ASK = /range (?:mes|les|toutes les) fen[êe]tres|cache (?:mes|les|toutes les) fen[êe]tres|montre(?:-moi)? (?:le|mon) bureau|r[ée]duis (?:tout|toutes les fen[êe]tres)|tidy (?:up )?(?:my |the )?windows|minimi[sz]e (?:all|everything|my windows|the windows)|show (?:me )?(?:the |my )?desktop|hide (?:all |every |the other |other )?apps|ordena (?:mis |las )?ventanas|minimiza (?:todo|todas)|muestra el escritorio|organiza (?:minhas |as )?janelas|minimiza tudo|mostra a [áa]rea de trabalho|сверни (?:все|окна)|убери окна|покажи рабочий стол/i;
 const UNTIDY_ASK = /(?:remets|ressors|rends-moi|rouvre) (?:mes|les) fen[êe]tres|(?:bring|put) (?:my |the )?windows back|restore (?:my |the )?windows|devu[ée]lve(?:me)? (?:mis |las )?ventanas|restaura (?:mis |las )?ventanas|volta (?:minhas |as )?janelas|traz (?:minhas |as )?janelas de volta|верни окна/i;
 const PLACE_VERB = /^\s*(?:mets?|place|bouge|d[ée]place|put|move|snap|pon|coloca|mueve|bota|поставь|перемести|сдвинь)\s+/i;
+const PLACE_ANY = /\b(?:mets?|place|bouge|d[ée]place|put|move|snap|pon|coloca|mueve|bota|поставь|перемести|сдвинь)\b/i;
 const SIDE = [
   ['left', /\s*(?:[àa] |on the |to the |a la |na |[àa] la )?(?:gauche|left|izquierda|esquerda|слева|влево|налево)\b/i],
   ['right', /\s*(?:[àa] |on the |to the |a la |na |[àa] la )?(?:droite|right|derecha|direita|справа|вправо|направо)\b/i],
@@ -261,6 +264,7 @@ export class Chat {
   async start() {
     const { capri, host, t } = this;
     if (this.open) {
+      if (host.platform === 'darwin') host.focusOverlay(true);
       this.panel.chatInput.focus();
       return;
     }
@@ -525,6 +529,22 @@ export class Chat {
     return null;
   }
 
+  // "Open TextEdit and put it on the left": the app is in the first clause, the side in the second.
+  placesIn(text) {
+    const openPart = text.split(/\s+(?:et|and|y|e|и)\s+/i).find((part) => OPEN_ASK.test(part) && !PLACE_ANY.test(part));
+    const open = openPart ? openPart.replace(OPEN_ASK, ' ').replace(/[\s.!?,]+/g, ' ').trim() : '';
+    const places = text.split(/\s+(?:et|and|y|e|и)\s+/i).map((part) => {
+      if (!PLACE_ANY.test(part)) return null;
+      const side = SIDE.find(([, re]) => re.test(part));
+      if (!side) return null;
+      const name = part.replace(PLACE_ANY, ' ').replace(side[1], ' ').replace(OPEN_ASK, ' ')
+        .replace(/\b(?:la|le|les|l['’]|the|el|o|a|it|them|that|this|fen[êe]tre|window|ventana|janela|окно|half|moiti[eé]|screen|[ée]cran|pantalla|tela|экран|of|de|du|des|on|to|side|c[oô]t[eé])\b/gi, ' ')
+        .replace(/[\s.!?,]+/g, ' ').trim();
+      return { name: name || open, side: side[0] };
+    }).filter((place) => place?.name && place.name.length >= 2);
+    return { places, open };
+  }
+
   // Something to do to your PC itself (system.js), read off your message: { kind: 'pc', what, ... }
   askedPc(text, count) {
     const pc = (what, more = {}) => ({ kind: 'pc', what, ...more });
@@ -543,25 +563,23 @@ export class Chat {
       const ms = duration(text);
       if (ms >= 1000) return pc('timer', { ms });
     }
-    if (count <= 10) {
+    if (count <= 12) {
       const level = VOLUME_ASK.exec(text)?.[1];
       if (level && Number(level) <= 100) return pc('volume', { level: Number(level) });
       if (UNMUTE_ASK.test(text)) return pc('volume', { mute: false });
       if (MUTE_ASK.test(text)) return pc('volume', { mute: true });
+      if (this.host.platform === 'darwin' && VOLUME_UP.test(text)) return pc('volume', { delta: 10 });
+      if (this.host.platform === 'darwin' && VOLUME_DOWN.test(text)) return pc('volume', { delta: -10 });
     }
-    // "mets Discord à gauche et Chrome à droite"
-    if (PLACE_VERB.test(text) && SIDE.some(([, re]) => re.test(text))) {
-      const places = text.split(/\s+(?:et|and|y|e|и)\s+/i).map((part) => {
-        const side = SIDE.find(([, re]) => re.test(part));
-        if (!side) return null;
-        const name = part.replace(PLACE_VERB, '').replace(side[1], '').replace(/\b(?:la|le|les|l['’]|the|el|o|a|fen[êe]tre|window|ventana|janela|окно)\b/gi, '').replace(/[\s.!?,]+/g, ' ').trim();
-        return name.length >= 2 ? { name, side: side[0] } : null;
-      }).filter(Boolean);
-      if (places.length) return pc('arrange', { places });
-    }
+    // "mets Discord à gauche", or "open TextEdit and put it on the left half"
+    const placed = this.placesIn(text);
+    if (placed.places.length && SIDE.some(([, re]) => re.test(text))) return pc('arrange', placed);
     if (count <= 12) {
       const page = SETTINGS_PAGES.find(([, re]) => re.test(text))?.[0];
       if (page && SETTINGS_WORD.test(text)) return pc('settings', { page });
+      if (this.host.platform === 'darwin' && /bluetooth/i.test(text) && /connected|paired|branch|conectad|подключ/i.test(text) && !OPEN_ASK.test(text)) {
+        return pc('info', { info: 'bluetooth' });
+      }
       const info = INFO_ASK.find(([, re]) => re.test(text))?.[0];
       if (info && (QUESTION.test(text) || count <= 3)) return pc('info', { info });
       if (page && OPEN_ASK.test(text)) return pc('settings', { page });
@@ -587,11 +605,16 @@ export class Chat {
         }
         if (asked.info === 'disk') return { line: fmt(t.disk, { free: gb(r.free), total: gb(r.total), drive: r.drive }), face: 'look' };
         if (asked.info === 'ram') return { line: fmt(t.ram, { used: gb(r.used), total: gb(r.total) }), face: 'look' };
+        if (asked.info === 'bluetooth') {
+          return r.devices?.length
+            ? { line: fmt(t.bluetooth, { devices: r.devices.join(', ') }), face: 'look' }
+            : { line: t.noBluetooth, face: 'look' };
+        }
         return { line: r.ip ? fmt(t.ip, { ip: r.ip }) : t.noIp, face: 'look' };
       }
       case 'volume': {
         this.capri.pulse();
-        const r = await run({ action: 'volume', level: asked.level, mute: asked.mute });
+        const r = await run({ action: 'volume', level: asked.level, mute: asked.mute, delta: asked.delta });
         if (!r) return null;
         return { line: asked.mute === true ? t.muted : asked.mute === false ? t.unmuted : fmt(t.volume, { level: r.level }), face: 'smug' };
       }
@@ -607,7 +630,11 @@ export class Chat {
         setTimeout(() => { document.documentElement.style.visibility = ''; }, 2500);
         return (await run({ action: 'snip' })) ? { line: t.snip, face: 'smug' } : null;
       case 'tidy': {
-        if (asked.back) return (await run({ action: 'tidy', back: true })) ? { line: t.back, face: 'smug' } : null;
+        if (asked.back) {
+          const back = await run({ action: 'tidy', back: true });
+          if (back?.denied) return { line: this.t.mediaUnavailable, face: 'aside' };
+          return back ? { line: t.back, face: 'smug' } : null;
+        }
         // she sweeps them off one after the other, front first, then they go
         const wins = this.capri.windows.wins.slice(0, 6);
         this.zap();
@@ -616,16 +643,24 @@ export class Chat {
           this.voice.play('bolt', { soft: true });
         }, 120 + i * 110));
         await new Promise((r) => setTimeout(r, 200 + wins.length * 110));
-        return (await run({ action: 'tidy' })) ? { line: t.tidy, face: 'laugh' } : null;
+        const tidied = await run({ action: 'tidy' });
+        if (tidied?.denied) return { line: this.t.mediaUnavailable, face: 'aside' };
+        return tidied ? { line: t.tidy, face: 'laugh' } : null;
       }
       case 'arrange': {
         this.zap();
+        if (asked.open) {
+          const item = await this.host.findLaunch(asked.open);
+          if (item && !item.risky) await this.host.launch(item);
+          await new Promise((r) => setTimeout(r, 700));
+        }
         const lines = [];
         for (const { name, side } of asked.places) {
           const r = await run({ action: 'arrange', name, side });
-          lines.push(r?.found ? fmt(t.placed, { app: r.name, side: t.sides[side] }) : fmt(t.notOpen, { app: name }));
+          if (r?.denied) lines.push(this.t.mediaUnavailable);
+          else lines.push(r?.found ? fmt(t.placed, { app: r.name, side: t.sides[side] }) : fmt(t.notOpen, { app: name }));
         }
-        return { line: lines.join('\n'), face: 'smug' };
+        return { line: lines.join('\n'), face: lines.some((line) => line === this.t.mediaUnavailable) ? 'aside' : 'smug' };
       }
       case 'theme':
         this.zap();
@@ -853,10 +888,14 @@ export class Chat {
     return site ? this.offerSite(site.url, answer) : this.addLine(answer, fmt(t.notInstalled, { app: value }));
   }
 
-  // her answer, with a line of what she did under it
+  // her answer, with a line of what she did under it. A refusal is dropped once the action ran:
+  // a small model still says it can't while the line under it shows that it did.
   addLine(answer, line, face = null) {
     if (!this.open || this.turn) return;
-    this.panel.stream(answer === '…' ? line : `${answer}\n${line}`, { done: true }); // nothing but a tag: just the line
+    const text = answer === '…' || !line ? (line || answer) : (denies(answer) ? line : `${answer}\n${line}`);
+    const last = this.history.at(-1);
+    if (last?.role === 'assistant') last.content = text;
+    this.panel.stream(text, { done: true });
     if (face) this.panel.setFace(face);
   }
 
@@ -893,6 +932,7 @@ export class Chat {
     this.capri.pulse();
     const ok = await this.host.media(action);
     if (ok) this.addLine(answer, this.t.media[action], 'smug');
+    else if (this.host.platform === 'darwin') this.addLine(answer, this.t.mediaUnavailable, 'aside');
   }
 
   // A Spotify search, in the app if it's there.
@@ -946,7 +986,7 @@ export class Chat {
       return;
     }
     this.panel.setActions(
-      [{ id: 'close', label: fmt(t.closeIt, { app: app.name }), primary: true }, { id: 'no', label: t.no }],
+      [{ id: 'close', label: fmt(t.closeIt, { app: this.host.platform === 'darwin' ? app.label || app.name : app.name }), primary: true }, { id: 'no', label: t.no }],
       (id) => (id === 'close' ? this.closeApp(app) : this.panel.setActions([])),
     );
   }
@@ -959,10 +999,11 @@ export class Chat {
     capri.zap(h.x + capri.towardCenter() * 280, h.y - 170);
     const res = await this.host.closeApp(app.name, force);
     if (!this.open) return;
+    const name = this.host.platform === 'darwin' ? app.label || app.name : app.name;
     let line;
     if (res.error) line = `${t.failed} ${res.error}`;
-    else if (!res.running) line = fmt(force ? t.forced : t.closed, { app: app.name });
-    else line = fmt(force ? t.unkillable : t.stillOpen, { app: app.name });
+    else if (!res.running) line = fmt(force ? t.forced : t.closed, { app: name });
+    else line = fmt(force ? t.unkillable : t.stillOpen, { app: name });
     this.panel.setFace(res.running || res.error ? 'aside' : 'laugh');
     this.panel.stream(line, { done: true });
     this.remember({ role: 'assistant', content: line });
@@ -976,11 +1017,15 @@ export class Chat {
     this.listApps();
   }
 
-  // What she can do on the PC when you ask (Windows), and nothing else.
+  // What she can do on the computer when you ask, and nothing else.
   powers() {
+    const mac = this.host.platform === 'darwin';
     const lines = [
       'Only when the user asks you to open an app, a game, a file or folder on their desktop, or a folder like Downloads, to play music, to control the music playing, or to open a website: say in a few words that you will, and end your answer with one tag: [[open: NAME]], [[music: ARTIST - SONG]] (it plays on YouTube; if they did not say which song, pick one that fits), [[media: ACTION]] (ACTION: pause, play, next, previous, volup, voldown or mute), or [[site: ADDRESS]]. Some of these get a button to confirm, so never say it is already done. Any other time, write no tag at all: there are no other tags.',
     ];
+    if (mac) {
+      lines.push('On this Mac, when they ask, the system really does these and a line under your answer shows the result: play, pause, or skip in Apple Music; set or change the volume; say which Bluetooth devices are connected; open a settings pane; start a screenshot snip; turn dark mode or light mode on; hide the other apps or bring them back; move an open app to the left or right half of the screen; lock the Mac, put it to sleep, or shut it down or restart it (lock, sleep, shutdown, and restart wait for their button). Say that you will, in a few words. Never say you cannot, and call it a Mac, never a PC.');
+    }
     if (this.apps.length) {
       const open = this.apps.map(({ name, label }) => (label && label !== name ? `${name} (${label})` : name)).join(', ');
       lines.push(`You can also close an app that's open, only when they ask you to: end your answer with [[close: NAME]], NAME being the exact name from this list (the part before the parentheses). They get a button to confirm it. Apps open right now: ${open}.`);
@@ -991,7 +1036,9 @@ export class Chat {
       if (soon.length) lines.push(`Reminders you're keeping for them: ${soon.map((r) => `${clock(r.at, this.brain.lang)}${r.text ? ` (${r.text})` : ''}`).join('; ')}.`);
     }
     lines.push('Your system also searches the user\'s files when they ask you to find one, searches the web when they ask, takes screenshots, and starts Roblox games by name: what it did shows under your answer, so never make up file names or results.');
-    lines.push('Apart from that, you can\'t see the user\'s screen or files, and you can\'t touch anything else on their PC (settings, files): if asked, say plainly that you can\'t, in character, and don\'t pretend to.');
+    lines.push(mac
+      ? 'Apart from that list, you can\'t see their screen or files unless they asked you to look or search, and you can\'t touch anything else on their Mac. If they ask for something outside that list, say plainly that you can\'t.'
+      : 'Apart from that, you can\'t see the user\'s screen or files, and you can\'t touch anything else on their PC (settings, files): if asked, say plainly that you can\'t, in character, and don\'t pretend to.');
     return lines;
   }
 
@@ -1081,6 +1128,11 @@ export class Chat {
       lang.last,
     ].join('\n');
   }
+}
+
+// The model denying an action the system already handled. Kept out of the bubble.
+function denies(text) {
+  return /\b(?:can(?:not|'t)|cannot|unable|no access|don'?t have|do not have|not able|won'?t|will not|haven'?t|have not|didn'?t|did not)\b|\bnot a\b|не могу|нет доступа|je ne peux pas|no puedo|não posso|pas accès/i.test(text);
 }
 
 // The model's answer as she'd say it: no reasoning block, no markdown marks.

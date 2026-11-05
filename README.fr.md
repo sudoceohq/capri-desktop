@@ -329,10 +329,11 @@ npm install
 npm start
 ```
 
-Garde ce terminal ouvert tant qu'elle tourne. Pas encore testé sur macOS ni Linux : elle devrait démarrer, mais les tours
-avec les fenêtres (s'asseoir dessus, les posséder, t'afficher la réponse de Claude quand tu es ailleurs) ne marchent que
-sous Windows, et sous Linux le calque transparent marche mieux sous X11 (Wayland a du mal avec les fenêtres qui laissent
-passer les clics).
+Garde ce terminal ouvert tant qu'elle tourne. Sur macOS, il faut aussi les outils de ligne de commande d’Apple
+(`xcode-select --install`) pour compiler le petit programme natif. Un DMG non signé s'installe en le glissant dans
+Applications, puis Contrôle-clic › Ouvrir, ou `xattr -cr /Applications/Capri.app`. Voir le [guide macOS](docs/macos.md) (en anglais)
+pour les prérequis, la création des paquets et l’état des tests. Linux reste non testé ; le calque transparent fonctionne
+mieux sous X11 et le suivi des fenêtres ainsi que le contrôle des applications n’y sont pas implémentés.
 
 ### La brancher sur Claude Code à la main
 
@@ -358,6 +359,7 @@ pour Claude Code. Ensuite :
 
 Elle en suit un seul à la fois, celui choisi dans son menu, et ses répliques, son guide et son chat prennent son nom.
 Elle ne fait que regarder : quand Codex ou Antigravity demande une autorisation, c'est toujours là-bas que tu réponds.
+Les vérifications d'autorisation de Codex sont de simples messages d'état : le hook se déclenche avant la décision et ne permet pas à Capri de savoir si une réponse humaine reste nécessaire. Ses questions explicites déclenchent toujours une alerte.
 En ligne de commande : `npm run hooks:codex:install` ou `npm run hooks:agy:install` (`:uninstall` pour les retirer),
 et `npm run test:hooks` lance les tests des deux adaptateurs. **Surveiller** › **Rien, juste me tenir compagnie** :
 elle ne parle plus d'aucun.

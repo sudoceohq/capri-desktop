@@ -7,3 +7,7 @@ Thumbs.db
 
 # local debug captures
 captures/
+
+# Compiled macOS helper and the icon built from the 256px PNG (native/macos, scripts/build-macos.js)
+native/bin/
+assets/icons/capri.icns

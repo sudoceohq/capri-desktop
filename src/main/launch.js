@@ -1,10 +1,11 @@
 'use strict';
 
-// Opening things when you ask her to (chat.js): an app from the Start menu (Store apps like Spotify
-// included), a Steam or Epic game, your music (the media keys: pause, next…, so it works with
-// Spotify and most players), a Spotify search, or a website. Windows only.
+// Opening things when you ask her to (chat.js): an app, a Steam or Epic game, your music (the media
+// keys: pause, next…, so it works with Spotify and most players), a Spotify search, or a website.
+// macOS opens .app bundles, Finder, and Trash. Epic and the Start menu stay Windows-only.
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn, execFile } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
@@ -12,6 +13,7 @@ const { app, shell } = require('electron');
 const { powershell } = require('./apps');
 
 const WIN = process.platform === 'win32';
+const MAC = process.platform === 'darwin';
 // not things to open from a chat: uninstallers, help pages and the like
 const SKIP = /uninstall|désinstaller|desinstalar|deinstall|readme|documentation|release notes|support center|website|manual/i;
 const STEAM_SKIP = /redistributable|dedicated server|steamworks/i;
@@ -20,6 +22,7 @@ const FILLER = new Set(['player', 'launcher', 'app', 'the', 'for', 'windows', 'd
 const CACHE_MS = 10 * 60 * 1000; // installed apps hardly change
 
 let cache = null; // { at, items }
+let macScan = null; // share discovery while the first native inventory is still being read
 
 const plain = (text) => String(text || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
 const words = (text) => plain(text).split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 2);
@@ -27,6 +30,14 @@ const words = (text) => plain(text).split(/[^\p{L}\p{N}]+/u).filter((w) => w.len
 // Everything she can open: [{ name, kind: 'app' | 'steam' | 'epic', id }]
 async function launchables() {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.items;
+  if (MAC) {
+    if (!macScan) macScan = require('./macos').run('installed').then((apps) => {
+      const games = steamGames(path.join(os.homedir(), 'Library', 'Application Support', 'Steam'));
+      cache = { at: Date.now(), items: [...games, ...apps].filter((item) => !SKIP.test(item.name)) };
+      return cache.items;
+    }).finally(() => { macScan = null; });
+    return macScan;
+  }
   if (!WIN) return [];
   const items = [];
   const seen = new Set();
@@ -132,7 +143,7 @@ function match(items, text) {
 
 // What's on your desktop (yours and the shared one): files, folders and shortcuts, by name.
 function desktopItems() {
-  const dirs = [app.getPath('desktop'), path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Desktop')];
+  const dirs = [app.getPath('desktop'), ...(WIN ? [path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Desktop')] : [])];
   const items = [];
   for (const dir of dirs) {
     let entries = [];
@@ -143,7 +154,7 @@ function desktopItems() {
     }
     for (const e of entries) {
       if (e.name.startsWith('.') || /^desktop\.ini$/i.test(e.name)) continue;
-      const folder = e.isDirectory();
+      const folder = e.isDirectory() && !(MAC && /\.app$/i.test(e.name));
       items.push({ name: folder ? e.name : e.name.replace(/\.[^.]+$/, ''), kind: folder ? 'folder' : 'file', id: path.join(dir, e.name) });
     }
   }
@@ -152,7 +163,8 @@ function desktopItems() {
 
 // files that run something: never opened without a click, even named by you
 const RUNS = /\.(exe|bat|cmd|ps1|vbs|vbe|js|jse|wsf|wsh|msi|msp|reg|scr|com|jar|hta|cpl|pif)$/i;
-const risky = (item) => item?.kind === 'file' && RUNS.test(item.id);
+const MAC_RUNS = /\.(app|command|sh|bash|zsh|py|pl|rb|scpt|applescript|workflow|pkg|dmg)$/i;
+const risky = (item) => item?.kind === 'file' && (RUNS.test(item.id) || (MAC && MAC_RUNS.test(item.id)));
 
 // Folders asked for by what they are ("ouvre mes téléchargements", "open the file explorer").
 const FOLDERS = [
@@ -167,11 +179,16 @@ const FOLDERS = [
 ];
 
 function knownFolder(text) {
+  if (MAC && /\bfinder\b/i.test(text)) return { name: 'explorer', kind: 'known', id: 'explorer' };
   const hit = FOLDERS.find(([, re]) => re.test(text));
   return hit ? { name: hit[0], kind: 'known', id: hit[0] } : null;
 }
 
 function openKnown(id) {
+  if (MAC) {
+    const dir = id === 'explorer' ? os.homedir() : id === 'recycle' ? path.join(os.homedir(), '.Trash') : app.getPath(id);
+    return Promise.resolve(shell.openPath(dir)).then((error) => { if (error) throw new Error(error); });
+  }
   if (id === 'explorer') return spawn('explorer.exe', [], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   if (id === 'recycle') return spawn('explorer.exe', ['shell:RecycleBinFolder'], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   return shell.openPath(app.getPath(id));
@@ -201,6 +218,9 @@ async function launch({ kind, id } = {}) {
   if (!item) throw new Error('not found');
   if (kind === 'steam') return shell.openExternal(`steam://rungameid/${id}`);
   if (kind === 'epic') return shell.openExternal(`com.epicgames.launcher://apps/${encodeURIComponent(id)}?action=launch&silent=true`);
+  if (MAC) {
+    return new Promise((resolve, reject) => execFile('/usr/bin/open', ['-a', id], (err) => (err ? reject(err) : resolve())));
+  }
   spawn('explorer.exe', [`shell:AppsFolder\\${id}`], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   return undefined;
 }
@@ -208,12 +228,39 @@ async function launch({ kind, id } = {}) {
 // The media keys, as if pressed on the keyboard: whatever plays music (Spotify, a browser…) reacts.
 // Play and pause are the same key; the volume moves a few steps at a time. Sent as keys (their virtual
 // key codes), not typed: typed, they come out as "³" or "°" on a German keyboard.
+// On macOS those posted keys report success and do nothing, so Music and the output volume are told directly.
 const MEDIA = { pause: [0xb3, 1], play: [0xb3, 1], next: [0xb0, 1], previous: [0xb1, 1], volup: [0xaf, 5], voldown: [0xae, 5], mute: [0xad, 1] };
 const KEY_DOWN = 1; // KEYEVENTF_EXTENDEDKEY
 const KEY_UP = 3;   // ...and KEYEVENTF_KEYUP
+const MAC_MUSIC = {
+  play: 'tell application "Music" to play',
+  pause: 'tell application "Music" to pause',
+  next: 'tell application "Music" to next track',
+  previous: 'tell application "Music" to previous track',
+};
+
+function macScript(script) {
+  return new Promise((resolve) => {
+    execFile('/usr/bin/osascript', ['-e', script], { timeout: 15000 }, (err) => resolve(!err));
+  });
+}
+
+async function macMedia(action) {
+  if (MAC_MUSIC[action]) return macScript(MAC_MUSIC[action]);
+  if (action === 'mute') return macScript('set volume with output muted');
+  const step = action === 'volup' ? 6 : action === 'voldown' ? -6 : 0;
+  if (!step) return false;
+  return macScript(`set currentLevel to output volume of (get volume settings)
+set nextLevel to currentLevel + (${step})
+if nextLevel > 100 then set nextLevel to 100
+if nextLevel < 0 then set nextLevel to 0
+set volume output volume nextLevel without muting`);
+}
 
 async function media(action) {
-  if (!WIN || !MEDIA[action]) return false;
+  if (!MEDIA[action]) return false;
+  if (MAC) return macMedia(action);
+  if (!WIN) return false;
   const [key, times] = MEDIA[action];
   return powershell(
     'Add-Type -Namespace Capri -Name Keys -MemberDefinition \'[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);\'; '
